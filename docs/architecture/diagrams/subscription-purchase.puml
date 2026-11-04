@@ -1,0 +1,248 @@
+@startuml
+' Título del diagrama
+title "Diagrama de Secuencia - Compra de Suscripción (Epic Things Platform)"
+
+' Definición de actores y objetos
+actor "Usuario" as user
+participant "Frontend\n(React)" as frontend
+participant "API Gateway" as gateway
+participant "Payment Service" as payment
+participant "Stripe API" as stripe
+database "PostgreSQL" as db
+participant "Redis" as cache
+
+' ============================================
+' FLUJO PRINCIPAL - COMPRA DE SUSCRIPCIÓN EXITOSA
+' ============================================
+
+user -> frontend: 1. Selecciona plan de suscripción\n(Silver, Gold o Legend)
+activate frontend
+
+frontend -> frontend: 2. Verificar que el usuario esté autenticado
+alt Usuario no autenticado
+    frontend --> user: 2a. Redirigir a login
+    deactivate frontend
+    end
+
+frontend -> gateway: 3. POST /api/payment/create-checkout\n{plan_id, success_url, cancel_url}
+activate gateway
+
+gateway -> payment: 4. Reenviar solicitud a Payment Service
+activate payment
+
+payment -> payment: 5. Validar que el plan exista y esté activo
+
+payment -> db: 6. SELECT * FROM planes\nWHERE id_plan = ? AND activo = TRUE
+activate db
+
+db --> payment: 7. Retorna datos del plan
+deactivate db
+
+payment -> payment: 8. Verificar si el usuario ya tiene suscripción activa
+
+payment -> db: 9. SELECT * FROM suscripciones\nWHERE id_usuario = ? AND estado = 'activa'
+activate db
+
+db --> payment: 10. Retorna suscripción activa (si existe)
+deactivate db
+
+alt Usuario tiene suscripción activa
+    payment --> gateway: 10a. Error: "Ya tienes una suscripción activa"
+    gateway --> frontend: 10b. Error 400 Bad Request
+    frontend --> user: 10c. Mostrar mensaje de suscripción activa
+    deactivate frontend
+    deactivate gateway
+    deactivate payment
+    end
+
+payment -> payment: 11. Crear sesión de checkout en Stripe
+
+payment -> stripe: 12. POST /v1/checkout/sessions\n{price_id, success_url, cancel_url, customer_email}
+activate stripe
+
+stripe --> payment: 13. Retorna session_id y checkout_url
+deactivate stripe
+
+payment -> db: 14. INSERT INTO transacciones\n(id_usuario, monto, metodo_pago = 'stripe', estado = 'pendiente')
+activate db
+
+db --> payment: 15. Retorna id_transaccion
+deactivate db
+
+payment -> cache: 16. Guardar relación session_id ↔ id_transaccion\n(TTL: 1 hora)
+activate cache
+
+cache --> payment: 17. Confirmación de almacenamiento
+deactivate cache
+
+payment --> gateway: 18. Respuesta exitosa\n{checkout_url, session_id}
+deactivate payment
+
+gateway --> frontend: 19. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend -> frontend: 20. Redirigir al checkout de Stripe
+frontend --> user: 21. Mostrar página de pago de Stripe
+deactivate frontend
+
+' ============================================
+' FLUJO - WEBHOOK DE STRIPE (PROCESAMIENTO DE PAGO)
+' ============================================
+
+stripe -> gateway: W1. Webhook POST /api/payment/webhook\n{event, session_id, ...}
+activate gateway
+
+gateway -> payment: W2. Reenviar webhook a Payment Service
+activate payment
+
+payment -> payment: W3. Verificar firma del webhook\n(validar que viene de Stripe)
+
+alt Firma inválida
+    payment --> gateway: W3a. Error 401 Unauthorized
+    gateway --> stripe: W3b. Devolver 401
+    deactivate gateway
+    deactivate payment
+    end
+
+payment -> cache: W4. Obtener id_transaccion de session_id
+activate cache
+
+cache --> payment: W5. Retorna id_transaccion
+deactivate cache
+
+alt Evento: checkout.session.completed
+    payment -> db: W6. UPDATE transacciones\nSET estado = 'completada', id_pago_externo = ?\nWHERE id_transaccion = ?
+    activate db
+    db --> payment: W7. Confirmación de actualización
+    deactivate db
+
+    payment -> payment: W8. Obtener id_usuario de la transacción
+
+    payment -> payment: W9. Calcular fecha_fin\n(fecha_inicio + periodo)
+
+    payment -> db: W10. INSERT INTO suscripciones\n(id_usuario, id_plan, id_transaccion, fecha_inicio, fecha_fin, estado = 'activa')
+    activate db
+    db --> payment: W11. Confirmación de creación de suscripción
+    deactivate db
+
+    payment -> db: W12. UPDATE transacciones\nSET id_suscripcion = ?\nWHERE id_transaccion = ?
+    activate db
+    db --> payment: W13. Confirmación de actualización
+    deactivate db
+
+    payment -> payment: W14. Actualizar rol del usuario en usuarios_roles
+
+    payment -> db: W15. INSERT INTO usuarios_roles\n(id_usuario, id_rol correspondiente al plan)
+    activate db
+    db --> payment: W16. Confirmación de asignación de rol
+    deactivate db
+
+    payment -> cache: W17. Eliminar la entrada session_id
+    activate cache
+    cache --> payment: W18. Confirmación de eliminación
+    deactivate cache
+
+else Evento: checkout.session.expired
+    payment -> db: W19. UPDATE transacciones\nSET estado = 'fallida'\nWHERE id_transaccion = ?
+    activate db
+    db --> payment: W20. Confirmación de actualización
+    deactivate db
+
+    payment -> cache: W21. Eliminar la entrada session_id
+    activate cache
+    cache --> payment: W22. Confirmación de eliminación
+    deactivate cache
+
+else Evento: charge.refunded
+    payment -> db: W23. UPDATE transacciones\nSET estado = 'reembolsada'\nWHERE id_pago_externo = ?
+    activate db
+    db --> payment: W24. Confirmación de actualización
+    deactivate db
+
+    payment -> db: W25. UPDATE suscripciones\nSET estado = 'cancelada'\nWHERE id_suscripcion = ?
+    activate db
+    db --> payment: W26. Confirmación de actualización
+    deactivate db
+
+    payment -> db: W27. ELIMINAR usuario_rol correspondiente al plan
+    activate db
+    db --> payment: W28. Confirmación de eliminación
+    deactivate db
+end
+
+payment --> gateway: W29. Confirmación de procesamiento
+deactivate payment
+
+gateway --> stripe: W30. 200 OK
+deactivate gateway
+
+' ============================================
+' FLUJO - CANCELACIÓN DE SUSCRIPCIÓN
+' ============================================
+
+user -> frontend: C1. Solicita cancelar suscripción
+activate frontend
+
+frontend -> gateway: C2. POST /api/payment/cancel-subscription
+activate gateway
+
+gateway -> payment: C3. Reenviar solicitud a Payment Service
+activate payment
+
+payment -> db: C4. SELECT * FROM suscripciones\nWHERE id_usuario = ? AND estado = 'activa'
+activate db
+
+db --> payment: C5. Retorna suscripción activa
+deactivate db
+
+alt No tiene suscripción activa
+    payment --> gateway: C5a. Error: "No tienes suscripción activa"
+    gateway --> frontend: C5b. Error 400 Bad Request
+    frontend --> user: C5c. Mostrar mensaje de error
+    deactivate frontend
+    deactivate gateway
+    deactivate payment
+    end
+
+payment -> stripe: C6. POST /v1/subscriptions/{subscription_id}/cancel
+activate stripe
+
+stripe --> payment: C7. Confirmación de cancelación
+deactivate stripe
+
+payment -> db: C8. UPDATE suscripciones\nSET estado = 'cancelada'\nWHERE id_suscripcion = ?
+activate db
+
+db --> payment: C9. Confirmación de actualización
+deactivate db
+
+payment -> db: C10. ELIMINAR usuario_rol correspondiente al plan\n(usuario vuelve a Explorador)
+activate db
+
+db --> payment: C11. Confirmación de eliminación
+deactivate db
+
+payment --> gateway: C12. {message: "Suscripción cancelada"}
+deactivate payment
+
+gateway --> frontend: C13. Reenviar respuesta
+deactivate gateway
+
+frontend --> user: C14. Mostrar mensaje de confirmación
+deactivate frontend
+
+' ============================================
+' ANOTACIONES DE SEGURIDAD
+' ============================================
+
+note right of payment
+  **Medidas de seguridad implementadas:**
+  1. Webhooks firmados (verificación de origen).
+  2. Idempotencia en procesamiento de webhooks.
+  3. Datos de pago no almacenados localmente (Stripe maneja los datos sensibles).
+  4. Tokens de sesión con expiración limitada.
+  5. Logs de todas las transacciones para auditoría.
+  6. Rollback automático en caso de error.
+end note
+
+@enduml

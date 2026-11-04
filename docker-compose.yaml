@@ -1,0 +1,281 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # API GATEWAY
+  # ============================================
+  api-gateway:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - auth-service
+      - games-service
+      - payment-service
+      - community-service
+      - notification-service
+    networks:
+      - epic-things-network
+
+  # ============================================
+  # MICROSERVICIOS
+  # ============================================
+  
+  auth-service:
+    build: ./backend/auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_NAME=epic_things
+      - REDIS_HOST=redis
+      - JWT_SECRET=${JWT_SECRET}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - epic-things-network
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+
+  games-service:
+    build: ./backend/games-service
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_NAME=epic_things
+      - REDIS_HOST=redis
+      - STORAGE_ENDPOINT=minio:9000
+    depends_on:
+      - postgres
+      - redis
+      - minio
+    networks:
+      - epic-things-network
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+
+  payment-service:
+    build: ./backend/payment-service
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_NAME=epic_things
+      - REDIS_HOST=redis
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - epic-things-network
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+
+  community-service:
+    build: ./backend/community-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_NAME=epic_things
+      - REDIS_HOST=redis
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - epic-things-network
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+
+  notification-service:
+    build: ./backend/notification-service
+    ports:
+      - "3005:3005"
+      - "3006:3006"  # WebSocket
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+    depends_on:
+      - redis
+      - rabbitmq
+    networks:
+      - epic-things-network
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+
+  analytics-service:
+    build: ./backend/analytics-service
+    ports:
+      - "3007:3007"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_NAME=epic_things
+      - ELASTICSEARCH_HOST=elasticsearch
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      - postgres
+      - elasticsearch
+      - rabbitmq
+    networks:
+      - epic-things-network
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+
+  # ============================================
+  # INFRAESTRUCTURA
+  # ============================================
+
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=epic_user
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=epic_things
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - epic-things-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - epic-things-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=epic_user
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - epic-things-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"  # Console
+    environment:
+      - MINIO_ROOT_USER=epic_user
+      - MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    networks:
+      - epic-things-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - epic-things-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  # ============================================
+  # FRONTEND
+  # ============================================
+
+  frontend-web:
+    build: ./frontend/web-app
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://api-gateway
+      - VITE_WS_URL=ws://notification-service:3006
+    depends_on:
+      - api-gateway
+    networks:
+      - epic-things-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+# ============================================
+# VOLÚMENES
+# ============================================
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  minio_data:
+  elasticsearch_data:
+
+# ============================================
+# REDES
+# ============================================
+
+networks:
+  epic-things-network:
+    driver: bridge

@@ -1,0 +1,88 @@
+================================================================================
+                    DIAGRAMA DE SECUENCIA - LOGIN
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+FLUJO PRINCIPAL - LOGIN EXITOSO
+--------------------------------------------------------------------------------
+
+1.  Usuario → Frontend: Ingresa credenciales (email/username + contraseña)
+2.  Frontend → Frontend: Validar formato de email/username y longitud de contraseña
+    [Error] → Mostrar error de validación
+3.  Frontend → API Gateway: POST /api/auth/login {email, password}
+4.  API Gateway → API Gateway: Validar que los campos existan
+5.  API Gateway → Auth Service: Reenviar solicitud
+6.  Auth Service → Auth Service: Validar parámetros de entrada (sanitización)
+7.  Auth Service → PostgreSQL: SELECT ... FROM usuarios WHERE email = ? OR username = ?
+8.  PostgreSQL → Auth Service: Retorna datos del usuario
+    [Usuario no encontrado] → Error 401 "Credenciales inválidas"
+9.  Auth Service → Auth Service: Verificar password_hash con bcrypt.compare()
+    [Contraseña incorrecta] → Registrar intento fallido → Error 401
+    [Usuario inactivo] → Error 403 "Cuenta desactivada"
+10. Auth Service → Auth Service: Generar JWT Token (expiración: 24h)
+11. Auth Service → Auth Service: Generar Refresh Token (expiración: 7 días)
+12. Auth Service → PostgreSQL: UPDATE usuarios SET ultimo_acceso = NOW()
+13. PostgreSQL → Auth Service: Confirmación de actualización
+14. Auth Service → Redis: Guardar Refresh Token con TTL 7 días
+15. Redis → Auth Service: Confirmación de almacenamiento
+16. Auth Service → API Gateway: {access_token, refresh_token, user_data}
+17. API Gateway → Frontend: 200 OK con tokens
+18. Frontend → Frontend: Almacenar tokens en localStorage/sessionStorage
+19. Frontend → Frontend: Redirigir a página de inicio
+20. Frontend → Usuario: Mostrar mensaje de bienvenida
+
+FLUJO ALTERNATIVO - 2FA ACTIVADO
+--------------------------------------------------------------------------------
+
+21. Auth Service → Auth Service: Verificar si usuario tiene 2FA activado
+22. Auth Service → API Gateway: "2FA_required" + temporary_token
+23. API Gateway → Frontend: Reenviar respuesta
+24. Frontend → Usuario: Mostrar pantalla de código 2FA
+25. Usuario → Frontend: Ingresa código de autenticación
+26. Frontend → API Gateway: POST /api/auth/verify-2fa {temporary_token, code}
+27. API Gateway → Auth Service: Reenviar solicitud
+28. Auth Service → Auth Service: Verificar código 2FA
+    [Código correcto] → Continuar con flujo principal (pasos 10-20)
+    [Código incorrecto] → Error 401 "Código 2FA inválido"
+
+FLUJO ALTERNATIVO - REFRESH TOKEN
+--------------------------------------------------------------------------------
+
+R1. Frontend → API Gateway: POST /api/auth/refresh {refresh_token}
+R2. API Gateway → Auth Service: Reenviar solicitud
+R3. Auth Service → Redis: Verificar refresh_token
+R4. Redis → Auth Service: Retorna validez del token
+R5. Auth Service → Auth Service: Generar nuevo access_token
+R6. Auth Service → API Gateway: Nuevo access_token
+R7. API Gateway → Frontend: Reenviar al frontend
+R8. Frontend → Frontend: Actualizar access_token
+    [Refresh Token inválido/vencido] → Error 401 → Limpiar tokens → Redirigir a login
+
+FLUJO ALTERNATIVO - CIERRE DE SESIÓN (LOGOUT)
+--------------------------------------------------------------------------------
+
+L1. Usuario → Frontend: Clic en "Cerrar Sesión"
+L2. Frontend → Frontend: Eliminar tokens de localStorage
+L3. Frontend → API Gateway: POST /api/auth/logout {refresh_token}
+L4. API Gateway → Auth Service: Reenviar solicitud
+L5. Auth Service → Redis: Invalidar refresh_token
+L6. Redis → Auth Service: Confirmación de invalidación
+L7. Auth Service → API Gateway: Confirmación de logout
+L8. API Gateway → Frontend: Confirmación de logout
+L9. Frontend → Frontend: Redirigir a página de login
+L10. Frontend → Usuario: Mostrar mensaje "Sesión cerrada"
+
+================================================================================
+MEDIDAS DE SEGURIDAD IMPLEMENTADAS
+================================================================================
+
+1. Rate limiting: 5 intentos por minuto (prevención de fuerza bruta).
+2. Bloqueo temporal tras 10 intentos fallidos.
+3. Logs de intentos fallidos para auditoría.
+4. JWT con firma HS256/RS256 (según configuración).
+5. Refresh token almacenado en Redis con TTL de 7 días.
+6. HTTPS obligatorio en producción (no transmitir tokens en texto plano).
+7. Sanitización de todos los inputs para prevenir inyecciones.
+8. Contraseñas almacenadas con bcrypt (salt automático).
+
+================================================================================

@@ -1,0 +1,151 @@
+@startuml
+' Título del diagrama
+title "Diagrama de Secuencia - Registro de Usuario (Epic Things Platform)"
+
+' Definición de actores y objetos
+actor "Usuario" as user
+participant "Frontend\n(React)" as frontend
+participant "API Gateway" as gateway
+participant "Auth Service" as auth
+database "PostgreSQL" as db
+participant "Redis" as cache
+participant "Email Service" as email
+
+' ============================================
+' FLUJO PRINCIPAL - REGISTRO EXITOSO
+' ============================================
+
+user -> frontend: 1. Completa formulario de registro\n(nombre, email, username, contraseña)
+activate frontend
+
+frontend -> frontend: 2. Validar formato de email,\nusername, contraseña (mín. 8 caracteres)
+alt Validación fallida
+    frontend --> user: 2a. Mostrar error de validación
+    deactivate frontend
+    end
+
+frontend -> gateway: 3. POST /api/auth/register\n{nombre, email, username, password}
+activate gateway
+
+gateway -> gateway: 4. Validar que todos los campos\nexistan y no estén vacíos
+gateway -> auth: 5. Reenviar solicitud a Auth Service
+activate auth
+
+auth -> auth: 6. Sanitizar y validar parámetros
+
+auth -> db: 7. SELECT id_usuario FROM usuarios\nWHERE email = ? OR username = ?
+activate db
+
+db --> auth: 8. Retorna si el email o username ya existen
+deactivate db
+
+alt Email o username ya registrado
+    auth --> gateway: 8a. Error: "Email o username ya existe"
+    gateway --> frontend: 8b. Error 409 Conflict
+    frontend --> user: 8c. Mostrar mensaje de conflicto
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+    end
+
+auth -> auth: 9. Generar hash de contraseña con bcrypt\n(salt automático, factor 10-12)
+
+auth -> db: 10. INSERT INTO usuarios\n(username, email, password_hash, nombre_completo)
+activate db
+
+db --> auth: 11. Retorna id_usuario del nuevo usuario
+deactivate db
+
+auth -> db: 12. INSERT INTO usuarios_roles\n(id_usuario, id_rol = 1)\n(rol por defecto: Explorador)
+activate db
+
+db --> auth: 13. Confirmación de asignación de rol
+deactivate db
+
+auth -> auth: 14. Generar token de verificación de email\n(JWT con expiración 24h)
+
+auth -> cache: 15. Guardar token de verificación en Redis\ncon TTL 24h
+activate cache
+
+cache --> auth: 16. Confirmación de almacenamiento
+deactivate cache
+
+auth -> email: 17. Enviar email de verificación\n(link con token)
+activate email
+
+email --> auth: 18. Confirmación de envío
+deactivate email
+
+auth --> gateway: 19. Respuesta exitosa\n{message: "Usuario registrado. Verifica tu email."}
+deactivate auth
+
+gateway --> frontend: 20. Reenviar respuesta al frontend\n(201 Created)
+deactivate gateway
+
+frontend --> user: 21. Mostrar mensaje de éxito\n"Revisa tu email para verificar la cuenta"
+deactivate frontend
+
+' ============================================
+' FLUJO ALTERNATIVO - VERIFICACIÓN DE EMAIL
+' ============================================
+
+user -> frontend: V1. Clic en link de verificación\n(desde el email)
+activate frontend
+
+frontend -> gateway: V2. GET /api/auth/verify-email?token={token}
+activate gateway
+
+gateway -> auth: V3. Reenviar solicitud a Auth Service
+activate auth
+
+auth -> cache: V4. Verificar token en Redis
+activate cache
+
+cache --> auth: V5. Retorna validez del token
+deactivate cache
+
+alt Token inválido o expirado
+    auth --> gateway: V5a. Error: "Token inválido o expirado"
+    gateway --> frontend: V5b. Error 400 Bad Request
+    frontend --> user: V5c. Mostrar error de verificación
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+    end
+
+auth -> db: V6. UPDATE usuarios\nSET email_verificado = TRUE\nWHERE id_usuario = ?
+activate db
+
+db --> auth: V7. Confirmación de actualización
+deactivate db
+
+auth -> cache: V8. Invalidar token en Redis
+activate cache
+
+cache --> auth: V9. Confirmación de invalidación
+deactivate cache
+
+auth --> gateway: V10. Respuesta exitosa\n{message: "Email verificado exitosamente"}
+deactivate auth
+
+gateway --> frontend: V11. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend --> user: V12. Mostrar mensaje de éxito\n"Cuenta verificada. ¡Bienvenido!"
+deactivate frontend
+
+' ============================================
+' ANOTACIONES DE SEGURIDAD
+' ============================================
+
+note right of auth
+  **Medidas de seguridad implementadas:**
+  1. Contraseña hasheada con bcrypt (nunca almacenada en texto plano).
+  2. Tokens de verificación con expiración limitada (24h).
+  3. Rate limiting: 3 registros por IP por hora.
+  4. Verificación de email obligatoria antes de jugar juegos premium.
+  5. Validación de contraseña: mínimo 8 caracteres, mayúscula, minúscula, número.
+  6. Sanitización de inputs para prevenir XSS e inyecciones SQL.
+end note
+
+@enduml

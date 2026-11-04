@@ -1,0 +1,196 @@
+@startuml
+' Título del diagrama
+title "Diagrama de Secuencia - Login (Epic Things Platform)"
+
+' Definición de actores y objetos
+actor "Usuario" as user
+participant "Frontend\n(React)" as frontend
+participant "API Gateway" as gateway
+participant "Auth Service" as auth
+database "PostgreSQL" as db
+participant "Redis" as cache
+
+' ============================================
+' FLUJO PRINCIPAL - LOGIN EXITOSO
+' ============================================
+
+user -> frontend: 1. Ingresa credenciales\n(email/username + password)
+activate frontend
+
+frontend -> frontend: 2. Validar formato de email/username\ny longitud de contraseña (mín. 8 caracteres)
+alt Validación fallida
+    frontend --> user: 2a. Mostrar error de validación
+    deactivate frontend
+    end
+
+frontend -> gateway: 3. POST /api/auth/login\n{email, password}
+activate gateway
+
+gateway -> gateway: 4. Validar que los campos\nexistan y no estén vacíos
+gateway -> auth: 5. Reenviar solicitud a Auth Service
+activate auth
+
+auth -> auth: 6. Validar parámetros de entrada\n(sanitización)
+
+auth -> db: 7. SELECT id_usuario, username, password_hash, activo\nFROM usuarios WHERE email = ? OR username = ?
+activate db
+
+db --> auth: 8. Retorna datos del usuario\n(usuario encontrado)
+deactivate db
+
+alt Usuario no encontrado
+    auth --> gateway: 8a. Error: "Credenciales inválidas"
+    gateway --> frontend: 8b. Error 401 Unauthorized
+    frontend --> user: 8c. Mostrar error genérico
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+    end
+
+auth -> auth: 9. Verificar password_hash\ncon bcrypt.compare()
+
+alt Contraseña incorrecta
+    auth -> db: 9a. Registrar intento fallido\n(para monitoreo de seguridad)
+    auth --> gateway: 9b. Error: "Credenciales inválidas"
+    gateway --> frontend: 9c. Error 401 Unauthorized
+    frontend --> user: 9d. Mostrar error genérico
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+    end
+
+alt Usuario inactivo (activo = false)
+    auth --> gateway: 9e. Error: "Cuenta desactivada"
+    gateway --> frontend: 9f. Error 403 Forbidden
+    frontend --> user: 9g. Mostrar mensaje de cuenta bloqueada
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+    end
+
+auth -> auth: 10. Generar JWT Token\n(expiración: 24h)
+auth -> auth: 11. Generar Refresh Token\n(expiración: 7 días)
+
+auth -> db: 12. UPDATE usuarios\nSET ultimo_acceso = CURRENT_TIMESTAMP\nWHERE id_usuario = ?
+activate db
+db --> auth: 13. Confirmación de actualización
+deactivate db
+
+auth -> cache: 14. Guardar Refresh Token\nen Redis con TTL 7 días
+activate cache
+cache --> auth: 15. Confirmación de almacenamiento
+deactivate cache
+
+auth --> gateway: 16. Respuesta exitosa\n{access_token, refresh_token, user_data}
+deactivate auth
+
+gateway --> frontend: 17. Reenviar respuesta al frontend\n(200 OK)
+deactivate gateway
+
+frontend -> frontend: 18. Almacenar tokens en\nlocalStorage o sessionStorage
+frontend -> frontend: 19. Redirigir a página de inicio\n(dashboard / juegos)
+
+frontend --> user: 20. Mostrar mensaje de bienvenida
+deactivate frontend
+
+' ============================================
+' FLUJO ALTERNATIVO - 2FA ACTIVADO
+' ============================================
+
+note right of auth: Si el usuario tiene 2FA activado
+
+auth -> auth: 21. Verificar si usuario tiene 2FA activado
+alt 2FA activado
+    auth --> gateway: 22. Responder con "2FA_required"\n+ temporary_token
+    gateway --> frontend: 23. Reenviar respuesta al frontend
+    frontend --> user: 24. Mostrar pantalla de código 2FA
+    user -> frontend: 25. Ingresa código de autenticación
+    frontend -> gateway: 26. POST /api/auth/verify-2fa\n{temporary_token, code}
+    gateway -> auth: 27. Reenviar solicitud a Auth Service
+    auth -> auth: 28. Verificar código 2FA
+    alt 2FA correcto
+        auth -> auth: 29. Continuar con flujo principal\n(pasos 10-20)
+    else 2FA incorrecto
+        auth --> gateway: 29a. Error: "Código 2FA inválido"
+        gateway --> frontend: 29b. Error 401 Unauthorized
+        frontend --> user: 29c. Mostrar error de 2FA
+    end
+end
+
+' ============================================
+' FLUJO ALTERNATIVO - REFRESH TOKEN
+' ============================================
+
+note right of frontend: Cuando el access_token expira
+
+frontend -> gateway: R1. POST /api/auth/refresh\n{refresh_token}
+activate gateway
+gateway -> auth: R2. Reenviar solicitud a Auth Service
+activate auth
+
+auth -> cache: R3. Verificar refresh_token en Redis
+activate cache
+cache --> auth: R4. Retorna validez del token
+deactivate cache
+
+alt Refresh Token válido
+    auth -> auth: R5. Generar nuevo access_token
+    auth --> gateway: R6. Nuevo access_token
+    gateway --> frontend: R7. Reenviar al frontend
+    frontend -> frontend: R8. Actualizar access_token
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+else Refresh Token inválido/vencido
+    auth --> gateway: R5a. Error 401 Unauthorized
+    gateway --> frontend: R6a. Error 401 Unauthorized
+    frontend -> frontend: R7a. Limpiar tokens y redirigir a login
+    frontend --> user: R8a. Mostrar mensaje: "Sesión expirada"
+    deactivate frontend
+    deactivate gateway
+    deactivate auth
+end
+
+' ============================================
+' FLUJO ALTERNATIVO - CIERRE DE SESIÓN (LOGOUT)
+' ============================================
+
+user -> frontend: L1. Clic en "Cerrar Sesión"
+activate frontend
+
+frontend -> frontend: L2. Eliminar tokens de localStorage
+frontend -> gateway: L3. POST /api/auth/logout\n{refresh_token}
+activate gateway
+gateway -> auth: L4. Reenviar solicitud a Auth Service
+activate auth
+
+auth -> cache: L5. Invalidar refresh_token en Redis
+activate cache
+cache --> auth: L6. Confirmación de invalidación
+deactivate cache
+
+auth --> gateway: L7. Confirmación de logout
+deactivate auth
+
+gateway --> frontend: L8. Confirmación de logout
+deactivate gateway
+
+frontend -> frontend: L9. Redirigir a página de login
+frontend --> user: L10. Mostrar mensaje: "Sesión cerrada"
+deactivate frontend
+
+' ============================================
+' ANOTACIONES DE SEGURIDAD
+' ============================================
+
+note right of auth
+  **Medidas de seguridad implementadas:**
+  1. Rate limiting: 5 intentos por minuto.
+  2. Bloqueo temporal tras 10 intentos fallidos.
+  3. Logs de intentos fallidos para auditoría.
+  4. JWT con firma HS256/RS256.
+  5. Refresh token almacenado en Redis.
+  6. HTTPS obligatorio en producción.
+end note
+
+@enduml

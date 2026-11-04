@@ -1,0 +1,144 @@
+@startuml
+' Título del diagrama
+title "Arquitectura General - Epic Things Platform"
+
+' ============================================
+' CAPA DE PRESENTACIÓN (CLIENTES)
+' ============================================
+
+rectangle "Clientes" {
+    actor "Usuario" as user
+    actor "Administrador" as admin
+    rectangle "Frontend Web\n(React + Vite)" as frontend_web
+    rectangle "Frontend Móvil\n(Futuro)" as frontend_mobile
+}
+
+' ============================================
+' CAPA DE ENTRADA (API GATEWAY)
+' ============================================
+
+rectangle "API Gateway" {
+    rectangle "Nginx / Kong" as gateway
+    rectangle "Rate Limiter" as rate_limiter
+    rectangle "Autenticación JWT" as jwt_auth
+    rectangle "Balanceo de Carga" as load_balancer
+}
+
+' ============================================
+' CAPA DE SERVICIOS (MICROSERVICIOS)
+' ============================================
+
+rectangle "Microservicios" {
+    rectangle "Auth Service\n(Node.js/PHP)" as auth_service
+    rectangle "Games Service\n(Node.js)" as games_service
+    rectangle "Payment Service\n(Node.js)" as payment_service
+    rectangle "Community Service\n(Node.js)" as community_service
+    rectangle "Notification Service\n(Node.js)" as notification_service
+    rectangle "Analytics Service\n(Python)" as analytics_service
+}
+
+' ============================================
+' CAPA DE INFRAESTRUCTURA
+' ============================================
+
+rectangle "Infraestructura" {
+    rectangle "PostgreSQL\n(Base de Datos)" as postgres
+    rectangle "Redis\n(Caché / Sesiones)" as redis
+    rectangle "RabbitMQ / Kafka\n(Colas de Mensajes)" as message_queue
+    rectangle "S3 / MinIO\n(Almacenamiento de Archivos)" as storage
+    rectangle "Elasticsearch\n(Búsqueda)" as elasticsearch
+}
+
+' ============================================
+' CAPA DE SERVICIOS EXTERNOS
+' ============================================
+
+rectangle "Servicios Externos" {
+    rectangle "Stripe API\n(Pagos)" as stripe
+    rectangle "SendGrid / AWS SES\n(Emails)" as email_service
+    rectangle "CDN\n(Cloudflare)" as cdn
+}
+
+' ============================================
+' RELACIONES
+' ============================================
+
+' Clientes → API Gateway
+user --> gateway : "HTTPS / WebSocket"
+admin --> gateway : "HTTPS"
+frontend_web --> gateway : "HTTPS / WebSocket"
+frontend_mobile --> gateway : "HTTPS"
+
+' API Gateway → Microservicios
+gateway --> auth_service : "/api/auth/*"
+gateway --> games_service : "/api/games/*"
+gateway --> payment_service : "/api/payment/*"
+gateway --> community_service : "/api/community/*"
+gateway --> notification_service : "/api/notifications/*"
+gateway --> analytics_service : "/api/analytics/*"
+
+' Microservicios → Infraestructura
+auth_service --> postgres : "SQL"
+auth_service --> redis : "Sesiones / Tokens"
+games_service --> postgres : "SQL"
+games_service --> redis : "Caché"
+games_service --> storage : "Subida de juegos"
+payment_service --> postgres : "SQL"
+payment_service --> redis : "Sesiones"
+community_service --> postgres : "SQL"
+community_service --> redis : "Caché"
+notification_service --> message_queue : "Publicar/Consumir"
+analytics_service --> postgres : "Lectura"
+analytics_service --> elasticsearch : "Indexación"
+
+' Microservicios → Colas de Mensajes
+auth_service --> message_queue : "Eventos (usuario.registrado)"
+games_service --> message_queue : "Eventos (juego.subido, juego.aprobado)"
+payment_service --> message_queue : "Eventos (pago.completado)"
+community_service --> message_queue : "Eventos (valoracion.nueva)"
+
+' Microservicios → Servicios Externos
+payment_service --> stripe : "API REST"
+notification_service --> email_service : "API REST"
+games_service --> storage : "S3 API"
+frontend_web --> cdn : "Static Assets"
+
+' Notas
+note bottom of gateway
+  **Funcionalidades del API Gateway:**
+  1. Autenticación JWT
+  2. Rate Limiting (100 req/min)
+  3. Balanceo de Carga
+  4. Circuit Breaker
+  5. Logging y Monitoreo
+  6. CORS Configuration
+end note
+
+note right of message_queue
+  **Eventos del Sistema:**
+  - usuario.registrado
+  - usuario.verificado
+  - suscripcion.creada
+  - suscripcion.cancelada
+  - juego.subido
+  - juego.aprobado
+  - juego.rechazado
+  - valoracion.nueva
+  - pago.completado
+  - pago.reembolsado
+end note
+
+' ============================================
+' FLUJO DE DATOS EN LOS EVENTOS
+' ============================================
+
+note top of analytics_service
+  **Analytics Service** consume eventos para:
+  - Métricas de usuarios
+  - Juegos más jugados
+  - Ingresos por período
+  - Comportamiento de usuarios
+  - Reportes para administradores
+end note
+
+@enduml

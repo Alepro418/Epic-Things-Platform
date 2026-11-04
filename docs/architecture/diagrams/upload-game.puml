@@ -1,0 +1,231 @@
+@startuml
+' Título del diagrama
+title "Diagrama de Secuencia - Subida de un Juego (Epic Things Platform)"
+
+' Definición de actores y objetos
+actor "Creador" as creator
+participant "Frontend\n(React)" as frontend
+participant "API Gateway" as gateway
+participant "Games Service" as games
+participant "Storage Service" as storage
+database "PostgreSQL" as db
+participant "Redis" as cache
+participant "Queue Service" as queue
+
+' ============================================
+' FLUJO PRINCIPAL - SUBIDA DE JUEGO EXITOSA
+' ============================================
+
+creator -> frontend: 1. Inicia subida de nuevo juego\n(completa formulario de metadatos)
+activate frontend
+
+frontend -> frontend: 2. Verificar que el usuario tenga\nrol de Creador (Gold) o superior
+alt No tiene permisos
+    frontend --> creator: 2a. Mostrar mensaje de permiso denegado\n"Necesitas ser Creador para subir juegos"
+    deactivate frontend
+    end
+
+frontend -> frontend: 3. Validar que los campos obligatorios\nestén completos
+
+frontend -> gateway: 4. POST /api/games/upload\n{titulo, descripcion, categoria, tipo, precio}
+activate gateway
+
+gateway -> gateway: 5. Validar existencia de campos
+gateway -> games: 6. Reenviar solicitud a Games Service
+activate games
+
+games -> games: 7. Sanitizar y validar metadatos
+
+games -> db: 8. SELECT * FROM usuarios\nWHERE id_usuario = ? AND activo = TRUE
+activate db
+
+db --> games: 9. Retorna datos del creador
+deactivate db
+
+games -> db: 10. INSERT INTO juegos\n(titulo, descripcion, categoria, tipo, precio, estado = 'borrador', id_creador, fecha_creacion)
+activate db
+
+db --> games: 11. Retorna id_juego del nuevo juego
+deactivate db
+
+games --> gateway: 12. Respuesta con id_juego y URL de subida\n{id_juego, upload_url}
+deactivate games
+
+gateway --> frontend: 13. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend -> frontend: 14. Preparar archivo del juego para subir\n(comprimir si es necesario)
+
+frontend -> storage: 15. PUT upload_url (archivo del juego)
+activate storage
+
+storage -> storage: 16. Guardar archivo en el bucket\n(generar nombre único)
+
+storage --> frontend: 17. Confirmación de subida\n{url_archivo, tamaño, hash}
+deactivate storage
+
+frontend -> gateway: 18. PUT /api/games/finalize-upload\n{id_juego, url_archivo, hash_archivo, tamaño}
+activate gateway
+
+gateway -> games: 19. Reenviar solicitud a Games Service
+activate games
+
+games -> db: 20. UPDATE juegos\nSET url_archivo = ?, estado = 'pendiente'\nWHERE id_juego = ? AND id_creador = ?
+activate db
+
+db --> games: 21. Confirmación de actualización
+deactivate db
+
+games -> queue: 22. Publicar evento en cola de revisión\n{id_juego, titulo, id_creador}
+activate queue
+
+queue --> games: 23. Confirmación de encolado
+deactivate queue
+
+games -> db: 24. INSERT INTO logs_actividad\n(id_usuario, accion = 'subir_juego', detalles)
+activate db
+
+db --> games: 25. Confirmación de log
+deactivate db
+
+games --> gateway: 26. Respuesta exitosa\n{id_juego, estado: 'pendiente', message: "Juego enviado a revisión"}
+deactivate games
+
+gateway --> frontend: 27. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend --> creator: 28. Mostrar mensaje de éxito\n"Juego subido. Estará disponible tras la revisión."
+deactivate frontend
+
+' ============================================
+' FLUJO ALTERNATIVO - PROCESO DE REVISIÓN (ADMIN)
+' ============================================
+
+note right of queue: Proceso asíncrono para revisores
+
+queue -> games: R1. Consumir evento de revisión
+activate games
+
+games -> db: R2. SELECT * FROM juegos\nWHERE id_juego = ? AND estado = 'pendiente'
+activate db
+
+db --> games: R3. Retorna datos del juego
+deactivate db
+
+games -> games: R4. Ejecutar validaciones automáticas:\n- Verificar que el archivo existe\n- Escanear malware\n- Comprobar que es un juego ejecutable
+
+games -> admin: R5. Notificar a administradores\n(para revisión manual)
+
+games -> queue: R6. Mover a cola de revisión manual\n(con prioridad)
+
+queue --> games: R7. Confirmación de encolado
+deactivate games
+
+' ============================================
+' FLUJO ALTERNATIVO - APROBACIÓN/RECHAZO POR ADMIN
+' ============================================
+
+admin -> frontend: A1. Accede a panel de revisión
+activate frontend
+
+frontend -> gateway: A2. GET /api/admin/games/pending
+activate gateway
+
+gateway -> games: A3. Reenviar solicitud a Games Service
+activate games
+
+games -> db: A4. SELECT * FROM juegos\nWHERE estado = 'pendiente'
+activate db
+
+db --> games: A5. Retorna lista de juegos pendientes
+deactivate db
+
+games --> gateway: A6. Retorna lista de juegos
+deactivate games
+
+gateway --> frontend: A7. Reenviar respuesta
+deactivate gateway
+
+frontend --> admin: A8. Mostrar lista de juegos pendientes
+deactivate frontend
+
+admin -> frontend: A9. Revisa un juego y toma decisión (aprobar/rechazar)
+
+admin -> frontend: A10. Clic en "Aprobar" o "Rechazar"
+activate frontend
+
+frontend -> gateway: A11. PUT /api/admin/games/approve-reject\n{id_juego, decision, comentario}
+activate gateway
+
+gateway -> games: A12. Reenviar solicitud a Games Service
+activate games
+
+games -> games: A13. Verificar que el administrador tenga permisos
+
+games -> db: A14. SELECT * FROM juegos\nWHERE id_juego = ? AND estado = 'pendiente'
+activate db
+
+db --> games: A15. Retorna datos del juego
+deactivate db
+
+alt Decisión: Aprobar
+    games -> db: A16a. UPDATE juegos\nSET estado = 'publicado', fecha_publicacion = CURRENT_TIMESTAMP\nWHERE id_juego = ?
+    activate db
+    db --> games: A17a. Confirmación de actualización
+    deactivate db
+
+    games -> db: A18a. INSERT INTO logs_actividad\n(id_usuario, accion = 'aprobar_juego', detalles)
+    activate db
+    db --> games: A19a. Confirmación de log
+    deactivate db
+
+    games -> cache: A20a. Invalidar caché de juegos\n(para refrescar listados)
+    activate cache
+    cache --> games: A21a. Confirmación de invalidación
+    deactivate cache
+
+    games --> gateway: A22a. {message: "Juego aprobado y publicado"}
+    
+else Decisión: Rechazar
+    games -> db: A16b. UPDATE juegos\nSET estado = 'rechazado'\nWHERE id_juego = ?
+    activate db
+    db --> games: A17b. Confirmación de actualización
+    deactivate db
+
+    games -> db: A18b. INSERT INTO logs_actividad\n(id_usuario, accion = 'rechazar_juego', detalles)
+    activate db
+    db --> games: A19b. Confirmación de log
+    deactivate db
+
+    games -> notification: A20b. Notificar al creador\n(sobre el rechazo y los motivos)
+    activate notification
+    notification --> games: A21b. Confirmación de envío
+    deactivate notification
+
+    games --> gateway: A22b. {message: "Juego rechazado"}
+end
+
+deactivate games
+
+gateway --> frontend: A23. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend --> admin: A24. Mostrar mensaje de confirmación
+deactivate frontend
+
+' ============================================
+' ANOTACIONES DE SEGURIDAD
+' ============================================
+
+note right of games
+  **Medidas de seguridad implementadas:**
+  1. Validación de tipo MIME del archivo.
+  2. Escaneo de malware en los archivos subidos.
+  3. Límite de tamaño de archivo (100MB - 500MB según tipo).
+  4. Cuarentena de archivos sospechosos.
+  5. Logs de todas las subidas y revisiones.
+  6. Solo usuarios con rol Creador (Gold) pueden subir juegos.
+  7. Proceso de revisión manual para evitar contenido inapropiado.
+end note
+
+@enduml

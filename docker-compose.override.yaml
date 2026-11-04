@@ -1,0 +1,84 @@
+version: '3.8'
+
+# Este archivo extiende docker-compose.yml para desarrollo
+# Se ejecuta automáticamente con docker-compose up
+
+services:
+  auth-service:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend/auth-service/src:/app/src
+      - ./backend/auth-service/package.json:/app/package.json
+    command: npm run dev  # Con hot-reload
+
+  games-service:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend/games-service/src:/app/src
+      - ./backend/games-service/package.json:/app/package.json
+    command: npm run dev
+
+  payment-service:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend/payment-service/src:/app/src
+      - ./backend/payment-service/package.json:/app/package.json
+    command: npm run dev
+
+  community-service:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend/community-service/src:/app/src
+      - ./backend/community-service/package.json:/app/package.json
+    command: npm run dev
+
+  notification-service:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend/notification-service/src:/app/src
+      - ./backend/notification-service/package.json:/app/package.json
+    command: npm run dev
+
+  analytics-service:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend/analytics-service/src:/app/src
+      - ./backend/analytics-service/requirements.txt:/app/requirements.txt
+    command: python src/app.py
+
+  frontend-web:
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:80
+    volumes:
+      - ./frontend/web-app/src:/app/src
+      - ./frontend/web-app/public:/app/public
+    command: npm run dev  # Vite con HMR
+
+  postgres:
+    ports:
+      - "5432:5432"  # Exponer para conexiones externas
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  elasticsearch:
+    ports:
+      - "9200:9200"

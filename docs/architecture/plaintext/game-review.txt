@@ -1,0 +1,107 @@
+================================================================================
+                    DIAGRAMA DE SECUENCIA - VALORACIÓN DE UN JUEGO
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+FLUJO PRINCIPAL - VALORACIÓN EXITOSA
+--------------------------------------------------------------------------------
+
+1.  Jugador → Frontend: Accede a página del juego
+2.  Frontend → API Gateway: GET /api/games/{id_juego}
+3.  API Gateway → Games Service: Reenviar solicitud
+4.  Games Service → PostgreSQL: SELECT * FROM juegos WHERE id_juego = ? AND estado = 'publicado'
+5.  PostgreSQL → Games Service: Retorna datos del juego
+6.  Games Service → PostgreSQL: SELECT * FROM valoraciones WHERE id_juego = ? ORDER BY fecha_valoracion DESC LIMIT 20
+7.  PostgreSQL → Games Service: Retorna últimas 20 valoraciones
+8.  Games Service → PostgreSQL: SELECT AVG(puntuacion) as media, COUNT(*) as total FROM valoraciones WHERE id_juego = ?
+9.  PostgreSQL → Games Service: Retorna media y total de valoraciones
+10. Games Service → API Gateway: Retorna datos del juego, valoraciones y estadísticas
+11. API Gateway → Frontend: Reenviar respuesta
+12. Frontend → Jugador: Mostrar página del juego con información y valoraciones
+
+FLUJO - JUGADOR ESCRIBE VALORACIÓN
+--------------------------------------------------------------------------------
+
+V1. Jugador → Frontend: Escribe comentario y selecciona puntuación (1-5)
+V2. Frontend → Frontend: Validar que el usuario esté autenticado
+    [No autenticado] → Redirigir a login "Más información después de iniciar sesión"
+V3. Frontend → Frontend: Validar que la puntuación esté entre 1 y 5
+V4. Frontend → API Gateway: POST /api/games/{id_juego}/rate {puntuacion, comentario}
+V5. API Gateway → Games Service: Reenviar solicitud
+V6. Games Service → Games Service: Verificar que el usuario existe y está activo
+V7. Games Service → PostgreSQL: SELECT * FROM usuarios WHERE id_usuario = ? AND activo = TRUE
+V8. PostgreSQL → Games Service: Retorna datos del usuario
+V9. Games Service → Games Service: Verificar si el juego existe y está publicado
+V10. Games Service → PostgreSQL: SELECT * FROM juegos WHERE id_juego = ? AND estado = 'publicado'
+V11. PostgreSQL → Games Service: Retorna datos del juego
+V12. Games Service → PostgreSQL: SELECT * FROM valoraciones WHERE id_usuario = ? AND id_juego = ?
+V13. PostgreSQL → Games Service: Retorna valoración existente (si existe)
+
+Si ya ha valorado este juego:
+    V14a. Games Service → PostgreSQL: UPDATE valoraciones SET puntuacion = ?, comentario = ?, fecha_valoracion = CURRENT_TIMESTAMP WHERE id_usuario = ? AND id_juego = ?
+    V15a. PostgreSQL → Games Service: Confirmación de actualización
+    V16a. Games Service → API Gateway: {message: "Valoración actualizada exitosamente"}
+
+Si es nueva valoración:
+    V14b. Games Service → PostgreSQL: INSERT INTO valoraciones (id_usuario, id_juego, puntuacion, comentario, fecha_valoracion)
+    V15b. PostgreSQL → Games Service: Confirmación de inserción
+    V16b. Games Service → API Gateway: {message: "Valoración agregada exitosamente"}
+
+V17. API Gateway → Frontend: Reenviar respuesta
+V18. Frontend → Frontend: Actualizar la interfaz (mostrar nueva valoración y actualizar media)
+V19. Frontend → Frontend: Refrescar estadísticas del juego
+V20. Frontend → Jugador: Mostrar confirmación y nueva valoración
+
+FLUJO ALTERNATIVO - VALORACIÓN CON ALERTAS DE SEGURIDAD
+--------------------------------------------------------------------------------
+
+S1. Games Service → Games Service: Verificar patrones de spam:
+    - Mismo comentario en múltiples juegos
+    - Misma IP con múltiples valoraciones
+    - Valoraciones extremas (todas 1 o todas 5)
+
+Si comportamiento sospechoso detectado:
+    S2a. Games Service → PostgreSQL: INSERT INTO logs_actividad (id_usuario, accion = 'spam_detectado', detalles)
+    S3a. PostgreSQL → Games Service: Confirmación de log
+    S4a. Games Service → Queue: Enviar alerta a moderadores
+    S5a. Queue → Games Service: Confirmación de encolado
+    S6a. Games Service → Games Service: Marcar valoración como 'revisar'
+        Si valoración automáticamente oculta:
+            S7a. Games Service → API Gateway: {message: "Valoración enviada para revisión"}
+        Si valoración aprobada automáticamente:
+            S7b. Games Service → API Gateway: {message: "Valoración agregada exitosamente"}
+
+Si comportamiento normal:
+    S2b. Games Service → API Gateway: {message: "Valoración agregada exitosamente"}
+
+FLUJO - REPORTAR VALORACIÓN INAPROPIADA
+--------------------------------------------------------------------------------
+
+R1. Jugador → Frontend: Clic en "Reportar" en una valoración
+R2. Frontend → Frontend: Verificar autenticación
+R3. Frontend → API Gateway: POST /api/games/{id_juego}/reports {valoracion_id, motivo, descripcion}
+R4. API Gateway → Games Service: Reenviar solicitud
+R5. Games Service → PostgreSQL: SELECT * FROM valoraciones WHERE id_valoracion = ?
+R6. PostgreSQL → Games Service: Retorna valoración reportada
+R7. Games Service → Games Service: Verificar que el usuario no se esté reportando a sí mismo
+R8. Games Service → PostgreSQL: INSERT INTO reportes (id_usuario_reportante, id_juego_reportado, tipo = 'comentario', motivo, descripcion, estado = 'pendiente')
+R9. PostgreSQL → Games Service: Confirmación de reporte
+R10. Games Service → PostgreSQL: INSERT INTO logs_actividad (id_usuario, accion = 'reportar_comentario', detalles)
+R11. PostgreSQL → Games Service: Confirmación de log
+R12. Games Service → Queue: Enviar notificación a moderadores
+R13. Queue → Games Service: Confirmación de encolado
+R14. Games Service → API Gateway: {message: "Reporte enviado exitosamente"}
+R15. API Gateway → Frontend: Reenviar respuesta
+R16. Frontend → Jugador: Mostrar mensaje de confirmación
+
+================================================================================
+MEDIDAS DE SEGURIDAD
+================================================================================
+
+1. Solo usuarios autenticados pueden valorar.
+2. Un usuario solo puede valorar un juego una vez.
+3. Detección de spam y comportamiento sospechoso.
+4. Moderación de valoraciones reportadas.
+5. Logs de todas las valoraciones y reportes.
+6. No se permite puntuar juegos del mismo creador.
+7. Sistema de verificación de integridad (evitar bots).

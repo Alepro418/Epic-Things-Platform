@@ -1,0 +1,567 @@
+
+---
+
+## 📄 auth.yaml
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Auth Service API
+  description: API de autenticación y gestión de usuarios para Epic Things Platform
+  version: 1.0.0
+  contact:
+    name: Álvaro Parra
+    email: parraalavaro418@gmail.com
+    url: https://github.com/Alepro418
+
+servers:
+  - url: https://api.epic-things.com/api/auth
+    description: Producción
+  - url: http://localhost:3001/api/auth
+    description: Desarrollo
+
+tags:
+  - name: Autenticación
+    description: Registro, login, logout
+  - name: Usuarios
+    description: Gestión de perfiles
+  - name: Verificación
+    description: Verificación de email y 2FA
+  - name: Tokens
+    description: Refresh y gestión de tokens
+
+paths:
+  # ============================================================
+  # AUTENTICACIÓN
+  # ============================================================
+
+  /register:
+    post:
+      tags:
+        - Autenticación
+      summary: Registrar nuevo usuario
+      description: Crea una nueva cuenta de usuario. Se envía email de verificación.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+                - nombre_completo
+              properties:
+                username:
+                  type: string
+                  minLength: 3
+                  maxLength: 50
+                  pattern: '^[a-zA-Z0-9_-]+$'
+                  example: "juanito123"
+                email:
+                  type: string
+                  format: email
+                  example: "juan@ejemplo.com"
+                password:
+                  type: string
+                  minLength: 8
+                  format: password
+                  description: Mínimo 8 caracteres, al menos una mayúscula, minúscula y número
+                  example: "MiPassword123"
+                nombre_completo:
+                  type: string
+                  maxLength: 100
+                  example: "Juan Pérez"
+      responses:
+        '201':
+          description: Usuario registrado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Usuario registrado exitosamente. Verifica tu email."
+                  id_usuario:
+                    type: integer
+                    example: 123
+        '400':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email o username ya existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /login:
+    post:
+      tags:
+        - Autenticación
+      summary: Iniciar sesión
+      description: Autentica usuario y retorna tokens JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email_or_username
+                - password
+              properties:
+                email_or_username:
+                  type: string
+                  example: "juanito123"
+                password:
+                  type: string
+                  format: password
+                  example: "MiPassword123"
+      responses:
+        '200':
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Credenciales inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Cuenta desactivada o no verificada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Demasiados intentos
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Segundos a esperar
+
+  /logout:
+    post:
+      tags:
+        - Autenticación
+      summary: Cerrar sesión
+      description: Invalida el refresh token actual
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIs..."
+      responses:
+        '200':
+          description: Sesión cerrada exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Sesión cerrada exitosamente"
+        '401':
+          description: Token inválido o sesión expirada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /refresh:
+    post:
+      tags:
+        - Tokens
+      summary: Renovar access token
+      description: Usa refresh token para obtener un nuevo access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIs..."
+      responses:
+        '200':
+          description: Nuevo access token generado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    example: "eyJhbGciOiJIUzI1NiIs..."
+                  expires_in:
+                    type: integer
+                    example: 86400
+        '401':
+          description: Refresh token inválido o expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================
+  # USUARIOS
+  # ============================================================
+
+  /me:
+    get:
+      tags:
+        - Usuarios
+      summary: Obtener perfil del usuario autenticado
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Perfil del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: No autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - Usuarios
+      summary: Actualizar perfil del usuario autenticado
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre_completo:
+                  type: string
+                  maxLength: 100
+                  example: "Juan Carlos Pérez"
+                avatar_url:
+                  type: string
+                  format: uri
+                  example: "https://cdn.epic-things.com/avatars/juanito.png"
+                biografia:
+                  type: string
+                  maxLength: 500
+                  example: "Amante de los juegos de plataforma"
+      responses:
+        '200':
+          description: Perfil actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No autenticado
+
+  /change-password:
+    post:
+      tags:
+        - Usuarios
+      summary: Cambiar contraseña
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - current_password
+                - new_password
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                  example: "MiPasswordViejo123"
+                new_password:
+                  type: string
+                  minLength: 8
+                  format: password
+                  example: "MiPasswordNuevo456"
+      responses:
+        '200':
+          description: Contraseña cambiada exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Contraseña actualizada exitosamente"
+        '401':
+          description: Contraseña actual incorrecta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================
+  # VERIFICACIÓN DE EMAIL
+  # ============================================================
+
+  /verify-email:
+    get:
+      tags:
+        - Verificación
+      summary: Verificar email
+      description: Verifica el email del usuario usando el token enviado por correo
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Token de verificación enviado por email
+      responses:
+        '200':
+          description: Email verificado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Email verificado exitosamente"
+        '400':
+          description: Token inválido o expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /resend-verification:
+    post:
+      tags:
+        - Verificación
+      summary: Reenviar email de verificación
+      description: Envía un nuevo link de verificación al email del usuario
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Email de verificación reenviado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Email de verificación reenviado"
+        '429':
+          description: Demasiadas solicitudes (límite: 3 por hora)
+
+  # ============================================================
+  # RECUPERACIÓN DE CONTRASEÑA
+  # ============================================================
+
+  /forgot-password:
+    post:
+      tags:
+        - Autenticación
+      summary: Solicitar recuperación de contraseña
+      description: Envía un email con link para resetear la contraseña
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "juan@ejemplo.com"
+      responses:
+        '200':
+          description: Email de recuperación enviado (si el email existe)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Si el email existe, recibirás instrucciones para recuperar tu contraseña"
+        '429':
+          description: Demasiadas solicitudes (límite: 2 por hora)
+
+  /reset-password:
+    post:
+      tags:
+        - Autenticación
+      summary: Resetear contraseña
+      description: Cambia la contraseña usando el token de recuperación
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - new_password
+              properties:
+                token:
+                  type: string
+                  example: "eyJhbGciOiJIUzI1NiIs..."
+                new_password:
+                  type: string
+                  minLength: 8
+                  format: password
+                  example: "MiNuevaPassword123"
+      responses:
+        '200':
+          description: Contraseña restablecida exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Contraseña restablecida exitosamente"
+        '400':
+          description: Token inválido o expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'JWT Token obtenido al iniciar sesión. Formato: `Bearer <token>`'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "Bad Request"
+        message:
+          type: string
+          example: "El campo email es requerido"
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: "email"
+              error:
+                type: string
+                example: "Formato de email inválido"
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        refresh_token:
+          type: string
+          example: "eyJhbGciOiJIUzI1NiIs..."
+        expires_in:
+          type: integer
+          example: 86400
+        user:
+          $ref: '#/components/schemas/UserProfile'
+
+    UserProfile:
+      type: object
+      properties:
+        id_usuario:
+          type: integer
+          example: 123
+        username:
+          type: string
+          example: "juanito123"
+        email:
+          type: string
+          example: "juan@ejemplo.com"
+        nombre_completo:
+          type: string
+          example: "Juan Pérez"
+        avatar_url:
+          type: string
+          nullable: true
+          example: "https://cdn.epic-things.com/avatars/juanito.png"
+        biografia:
+          type: string
+          nullable: true
+          example: "Amante de los juegos de plataforma"
+        roles:
+          type: array
+          items:
+            type: object
+            properties:
+              id_rol:
+                type: integer
+              nombre:
+                type: string
+                enum: ['Explorador', 'Jugador', 'Creador', 'Mecenas', 'Administrador']
+        email_verificado:
+          type: boolean
+          example: true
+        fecha_registro:
+          type: string
+          format: date-time
+          example: "2026-09-01T12:00:00Z"

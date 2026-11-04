@@ -1,0 +1,808 @@
+openapi: 3.0.3
+info:
+  title: Games Service API
+  description: API de gestión de juegos para Epic Things Platform
+  version: 1.0.0
+  contact:
+    name: Álvaro Parra
+    email: parraalavaro418@gmail.com
+
+servers:
+  - url: https://api.epic-things.com/api/games
+    description: Producción
+  - url: http://localhost:3002/api/games
+    description: Desarrollo
+
+tags:
+  - name: Catálogo
+    description: Listado y búsqueda de juegos
+  - name: Detalle
+    description: Información detallada de un juego
+  - name: Subida
+    description: Subida y gestión de juegos (Creadores)
+  - name: Revisión
+    description: Revisión de juegos (Administradores)
+  - name: Favoritos
+    description: Gestión de juegos favoritos
+
+paths:
+  # ============================================================
+  # CATÁLOGO
+  # ============================================================
+
+  /:
+    get:
+      tags:
+        - Catálogo
+      summary: Listar juegos
+      description: Obtiene una lista paginada de juegos publicados. Los juegos premium solo son visibles para usuarios con suscripción.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Número de página
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Elementos por página
+        - name: categoria
+          in: query
+          schema:
+            type: string
+            enum: ['Acción', 'Aventura', 'Puzzle', 'Estrategia', 'Deportes', 'Arcade', 'Educativo']
+          description: Filtrar por categoría
+        - name: tipo
+          in: query
+          schema:
+            type: string
+            enum: ['html5', 'unity', 'webgl']
+          description: Filtrar por tipo de juego
+        - name: precio
+          in: query
+          schema:
+            type: string
+            enum: ['gratis', 'premium']
+          description: Filtrar por precio
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: ['popular', 'reciente', 'mejor_valorado', 'descargas']
+            default: 'popular'
+          description: Ordenar resultados
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Búsqueda por título o descripción
+      responses:
+        '200':
+          description: Lista de juegos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GameSummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /{id_juego}:
+    get:
+      tags:
+        - Detalle
+      summary: Obtener detalle de un juego
+      description: Obtiene información completa de un juego. Los juegos premium requieren autenticación.
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: ID del juego
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Detalle del juego
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameDetail'
+        '401':
+          description: No autenticado (para juegos premium)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Suscripción requerida (juego premium)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Juego no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /{id_juego}/play:
+    get:
+      tags:
+        - Detalle
+      summary: Obtener URL para jugar
+      description: Retorna la URL del archivo del juego. Los juegos premium requieren autenticación.
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: URL del juego
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    example: "https://cdn.epic-things.com/games/platformer.html"
+                  tipo:
+                    type: string
+                    enum: ['html5', 'unity', 'webgl']
+        '401':
+          description: No autenticado
+        '403':
+          description: Suscripción requerida
+        '404':
+          description: Juego no encontrado
+
+  # ============================================================
+  # FAVORITOS
+  # ============================================================
+
+  /{id_juego}/favorite:
+    post:
+      tags:
+        - Favoritos
+      summary: Marcar juego como favorito
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '201':
+          description: Juego agregado a favoritos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Juego agregado a favoritos"
+        '401':
+          description: No autenticado
+
+    delete:
+      tags:
+        - Favoritos
+      summary: Eliminar juego de favoritos
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Juego eliminado de favoritos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Juego eliminado de favoritos"
+
+  /favorites:
+    get:
+      tags:
+        - Favoritos
+      summary: Listar juegos favoritos del usuario
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de juegos favoritos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GameSummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  # ============================================================
+  # SUBIDA DE JUEGOS (CREADORES)
+  # ============================================================
+
+  /upload:
+    post:
+      tags:
+        - Subida
+      summary: Iniciar subida de un juego
+      description: Crea un registro del juego y retorna URL para subir el archivo. Requiere rol de Creador (Gold).
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - titulo
+                - categoria
+                - tipo
+              properties:
+                titulo:
+                  type: string
+                  minLength: 3
+                  maxLength: 150
+                  example: "Aventura Épica"
+                descripcion:
+                  type: string
+                  maxLength: 5000
+                  example: "Un juego de plataformas en 2D con gráficos pixel art"
+                categoria:
+                  type: string
+                  enum: ['Acción', 'Aventura', 'Puzzle', 'Estrategia', 'Deportes', 'Arcade', 'Educativo']
+                  example: "Aventura"
+                tipo:
+                  type: string
+                  enum: ['html5', 'unity', 'webgl']
+                  example: "html5"
+                precio:
+                  type: number
+                  minimum: 0
+                  default: 0
+                  example: 0
+                url_imagen:
+                  type: string
+                  format: uri
+                  nullable: true
+                  example: "https://cdn.epic-things.com/images/portada.png"
+      responses:
+        '201':
+          description: Registro del juego creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id_juego:
+                    type: integer
+                    example: 456
+                  upload_url:
+                    type: string
+                    example: "https://cdn.epic-things.com/uploads/456/game.zip?token=..."
+                  message:
+                    type: string
+                    example: "Registro creado. Sube el archivo a la URL proporcionada."
+        '400':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Sin permisos (no es Creador)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Ya existe un juego con ese título
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /finalize-upload:
+    put:
+      tags:
+        - Subida
+      summary: Finalizar subida de juego
+      description: Confirma la subida del archivo y envía el juego a revisión
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id_juego
+                - url_archivo
+                - hash_archivo
+              properties:
+                id_juego:
+                  type: integer
+                  example: 456
+                url_archivo:
+                  type: string
+                  format: uri
+                  example: "https://cdn.epic-things.com/games/456/game.html"
+                hash_archivo:
+                  type: string
+                  description: "SHA-256 del archivo para verificar integridad"
+                  example: "a1b2c3d4e5f6..."
+                tamaño:
+                  type: integer
+                  description: "Tamaño en bytes"
+                  example: 1048576
+      responses:
+        '200':
+          description: Juego enviado a revisión
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id_juego:
+                    type: integer
+                    example: 456
+                  estado:
+                    type: string
+                    enum: ['pendiente']
+                    example: "pendiente"
+                  message:
+                    type: string
+                    example: "Juego enviado a revisión. Recibirás una notificación cuando sea aprobado."
+        '400':
+          description: Error de validación
+        '404':
+          description: Juego no encontrado o no pertenece al usuario
+
+  /my-games:
+    get:
+      tags:
+        - Subida
+      summary: Listar juegos del creador autenticado
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: estado
+          in: query
+          schema:
+            type: string
+            enum: ['borrador', 'pendiente', 'publicado', 'rechazado']
+          description: Filtrar por estado
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de juegos del creador
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GameCreatorSummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /{id_juego}/metrics:
+    get:
+      tags:
+        - Subida
+      summary: Obtener métricas de un juego
+      description: Estadísticas de visitas, descargas, tiempo jugado, etc. Solo para el creador o administrador.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Métricas del juego
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameMetrics'
+        '403':
+          description: Sin permisos
+        '404':
+          description: Juego no encontrado
+
+  /{id_juego}:
+    put:
+      tags:
+        - Subida
+      summary: Actualizar juego
+      description: Actualiza metadatos del juego. Solo el creador puede modificar su juego.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                titulo:
+                  type: string
+                  maxLength: 150
+                descripcion:
+                  type: string
+                  maxLength: 5000
+                categoria:
+                  type: string
+                  enum: ['Acción', 'Aventura', 'Puzzle', 'Estrategia', 'Deportes', 'Arcade', 'Educativo']
+                precio:
+                  type: number
+                  minimum: 0
+                url_imagen:
+                  type: string
+                  format: uri
+                  nullable: true
+      responses:
+        '200':
+          description: Juego actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameDetail'
+        '403':
+          description: Sin permisos
+        '404':
+          description: Juego no encontrado
+
+  # ============================================================
+  # REVISIÓN (ADMINISTRADORES)
+  # ============================================================
+
+  /admin/pending:
+    get:
+      tags:
+        - Revisión
+      summary: Listar juegos pendientes de revisión
+      description: Solo administradores
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de juegos pendientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GameAdminSummary'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '403':
+          description: Sin permisos (no es administrador)
+
+  /admin/{id_juego}/approve:
+    put:
+      tags:
+        - Revisión
+      summary: Aprobar un juego
+      description: Publica el juego y lo hace visible en el catálogo
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comentario:
+                  type: string
+                  example: "Excelente juego, bienvenido a la plataforma"
+      responses:
+        '200':
+          description: Juego aprobado y publicado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Juego aprobado y publicado exitosamente"
+        '403':
+          description: Sin permisos
+        '404':
+          description: Juego no encontrado
+
+  /admin/{id_juego}/reject:
+    put:
+      tags:
+        - Revisión
+      summary: Rechazar un juego
+      description: Rechaza el juego y notifica al creador
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_juego
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - motivo
+              properties:
+                motivo:
+                  type: string
+                  example: "El juego no cumple con los requisitos técnicos mínimos"
+      responses:
+        '200':
+          description: Juego rechazado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Juego rechazado. El creador ha sido notificado."
+        '403':
+          description: Sin permisos
+        '404':
+          description: Juego no encontrado
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+    GameSummary:
+      type: object
+      properties:
+        id_juego:
+          type: integer
+        titulo:
+          type: string
+        categoria:
+          type: string
+        tipo:
+          type: string
+        url_imagen:
+          type: string
+          nullable: true
+        precio:
+          type: number
+        puntuacion_media:
+          type: number
+          format: float
+        descargas:
+          type: integer
+        creador:
+          type: object
+          properties:
+            username:
+              type: string
+            nombre_completo:
+              type: string
+
+    GameDetail:
+      allOf:
+        - $ref: '#/components/schemas/GameSummary'
+        - type: object
+          properties:
+            descripcion:
+              type: string
+            url_demo:
+              type: string
+              nullable: true
+            fecha_publicacion:
+              type: string
+              format: date-time
+            estado:
+              type: string
+            valoraciones:
+              type: array
+              items:
+                $ref: '#/components/schemas/ValoracionSummary'
+            estadisticas:
+              type: object
+              properties:
+                puntuacion_media:
+                  type: number
+                total_valoraciones:
+                  type: integer
+                total_favoritos:
+                  type: integer
+                visitas:
+                  type: integer
+
+    ValoracionSummary:
+      type: object
+      properties:
+        id_usuario:
+          type: integer
+        username:
+          type: string
+        puntuacion:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comentario:
+          type: string
+        fecha:
+          type: string
+          format: date-time
+
+    GameCreatorSummary:
+      allOf:
+        - $ref: '#/components/schemas/GameSummary'
+        - type: object
+          properties:
+            estado:
+              type: string
+            fecha_creacion:
+              type: string
+              format: date-time
+            url_archivo:
+              type: string
+
+    GameAdminSummary:
+      allOf:
+        - $ref: '#/components/schemas/GameCreatorSummary'
+        - type: object
+          properties:
+            id_creador:
+              type: integer
+            creador_username:
+              type: string
+            creador_email:
+              type: string
+
+    GameMetrics:
+      type: object
+      properties:
+        id_juego:
+          type: integer
+        titulo:
+          type: string
+        visitas:
+          type: integer
+        descargas:
+          type: integer
+        tiempo_jugado_total:
+          type: integer
+        puntuacion_media:
+          type: number
+        total_valoraciones:
+          type: integer
+        visitas_ultimos_7_dias:
+          type: integer
+        descargas_ultimos_7_dias:
+          type: integer
+        top_paises:
+          type: array
+          items:
+            type: object
+            properties:
+              pais:
+                type: string
+              visitas:
+                type: integer

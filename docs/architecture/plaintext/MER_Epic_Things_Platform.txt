@@ -1,0 +1,16 @@
+================================================================================
+                    MODELO ENTIDAD-RELACIÓN (MER)
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+ÍNDICE
+--------------------------------------------------------------------------------
+1.  ENTIDADES Y RELACIONES (Vista General)
+2.  DEFINICIÓN DETALLADA DE TABLAS
+3.  DIAGRAMA PLANTUML
+4.  TABLA DE RELACIONES PRINCIPALES
+5.  CONSIDERACIONES DE SEGURIDAD
+6.  SCRIPT SQL COMPLETO
+7.  DIAGRAMA DE SECUENCIA - LOGIN  ← NUEVO
+8.  FLUJO DE REFRESH TOKEN        ← NUEVO
+9.  FLUJO DE LOGOUT               ← NUEVO

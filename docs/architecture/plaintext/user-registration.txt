@@ -1,0 +1,59 @@
+================================================================================
+                    DIAGRAMA DE SECUENCIA - REGISTRO DE USUARIO
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+FLUJO PRINCIPAL - REGISTRO EXITOSO
+--------------------------------------------------------------------------------
+
+1.  Usuario → Frontend: Completa formulario de registro (nombre, email, username, contraseña)
+2.  Frontend → Frontend: Validar formato de email, username, contraseña (mín. 8 caracteres)
+    [Error] → Mostrar error de validación
+3.  Frontend → API Gateway: POST /api/auth/register {nombre, email, username, password}
+4.  API Gateway → API Gateway: Validar que todos los campos existan y no estén vacíos
+5.  API Gateway → Auth Service: Reenviar solicitud
+6.  Auth Service → Auth Service: Sanitizar y validar parámetros
+7.  Auth Service → PostgreSQL: SELECT id_usuario FROM usuarios WHERE email = ? OR username = ?
+8.  PostgreSQL → Auth Service: Retorna si el email o username ya existen
+    [Email o username ya registrado] → Error 409 Conflict
+9.  Auth Service → Auth Service: Generar hash de contraseña con bcrypt (salt automático)
+10. Auth Service → PostgreSQL: INSERT INTO usuarios (username, email, password_hash, nombre_completo)
+11. PostgreSQL → Auth Service: Retorna id_usuario del nuevo usuario
+12. Auth Service → PostgreSQL: INSERT INTO usuarios_roles (id_usuario, id_rol = 1) -- Explorador
+13. PostgreSQL → Auth Service: Confirmación de asignación de rol
+14. Auth Service → Auth Service: Generar token de verificación de email (JWT, expiración 24h)
+15. Auth Service → Redis: Guardar token de verificación con TTL 24h
+16. Redis → Auth Service: Confirmación de almacenamiento
+17. Auth Service → Email Service: Enviar email de verificación (link con token)
+18. Email Service → Auth Service: Confirmación de envío
+19. Auth Service → API Gateway: {message: "Usuario registrado. Verifica tu email."}
+20. API Gateway → Frontend: 201 Created
+21. Frontend → Usuario: Mostrar mensaje de éxito "Revisa tu email para verificar la cuenta"
+
+FLUJO ALTERNATIVO - VERIFICACIÓN DE EMAIL
+--------------------------------------------------------------------------------
+
+V1. Usuario → Frontend: Clic en link de verificación (desde el email)
+V2. Frontend → API Gateway: GET /api/auth/verify-email?token={token}
+V3. API Gateway → Auth Service: Reenviar solicitud
+V4. Auth Service → Redis: Verificar token en Redis
+V5. Redis → Auth Service: Retorna validez del token
+    [Token inválido o expirado] → Error 400 "Token inválido o expirado"
+V6. Auth Service → PostgreSQL: UPDATE usuarios SET email_verificado = TRUE WHERE id_usuario = ?
+V7. PostgreSQL → Auth Service: Confirmación de actualización
+V8. Auth Service → Redis: Invalidar token en Redis
+V9. Redis → Auth Service: Confirmación de invalidación
+V10. Auth Service → API Gateway: {message: "Email verificado exitosamente"}
+V11. API Gateway → Frontend: Reenviar respuesta
+V12. Frontend → Usuario: Mostrar mensaje de éxito "Cuenta verificada. ¡Bienvenido!"
+
+================================================================================
+MEDIDAS DE SEGURIDAD
+================================================================================
+
+1. Contraseña hasheada con bcrypt (nunca almacenada en texto plano).
+2. Tokens de verificación con expiración limitada (24h).
+3. Rate limiting: 3 registros por IP por hora.
+4. Verificación de email obligatoria antes de jugar juegos premium.
+5. Validación de contraseña: mínimo 8 caracteres, mayúscula, minúscula, número.
+6. Sanitización de inputs para prevenir XSS e inyecciones SQL.

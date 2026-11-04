@@ -1,0 +1,593 @@
+openapi: 3.0.3
+info:
+  title: Payment Service API
+  description: API de pagos y suscripciones para Epic Things Platform
+  version: 1.0.0
+  contact:
+    name: Álvaro Parra
+    email: parraalavaro418@gmail.com
+
+servers:
+  - url: https://api.epic-things.com/api/payment
+    description: Producción
+  - url: http://localhost:3003/api/payment
+    description: Desarrollo
+
+tags:
+  - name: Suscripciones
+    description: Gestión de suscripciones y planes
+  - name: Checkout
+    description: Proceso de pago con Stripe
+  - name: Webhooks
+    description: Webhooks de Stripe
+  - name: Facturación
+    description: Facturas e historial de pagos
+  - name: Regalías
+    description: Pagos a creadores
+
+paths:
+  # ============================================================
+  # PLANES Y SUSCRIPCIONES
+  # ============================================================
+
+  /plans:
+    get:
+      tags:
+        - Suscripciones
+      summary: Listar planes de suscripción
+      description: Retorna los planes disponibles (Silver, Gold, Legend)
+      parameters:
+        - name: active
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Filtrar por planes activos
+      responses:
+        '200':
+          description: Lista de planes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Plan'
+
+  /subscriptions:
+    get:
+      tags:
+        - Suscripciones
+      summary: Obtener suscripción del usuario autenticado
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Suscripción del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '404':
+          description: No tiene suscripción activa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /subscriptions/history:
+    get:
+      tags:
+        - Suscripciones
+      summary: Historial de suscripciones del usuario
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Historial de suscripciones
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SubscriptionHistory'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /subscriptions/cancel:
+    post:
+      tags:
+        - Suscripciones
+      summary: Cancelar suscripción activa
+      description: Cancela la suscripción actual. El usuario mantiene acceso hasta la fecha de fin.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                motivo:
+                  type: string
+                  example: "Ya no uso la plataforma"
+      responses:
+        '200':
+          description: Suscripción cancelada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Suscripción cancelada. Seguirás teniendo acceso hasta el 2026-10-01"
+                  fecha_fin:
+                    type: string
+                    format: date-time
+        '400':
+          description: No tiene suscripción activa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No autenticado
+
+  # ============================================================
+  # CHECKOUT (STRIPE)
+  # ============================================================
+
+  /create-checkout:
+    post:
+      tags:
+        - Checkout
+      summary: Crear sesión de checkout de Stripe
+      description: Crea una sesión de pago en Stripe y retorna la URL para redirigir al usuario
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - plan_id
+                - success_url
+                - cancel_url
+              properties:
+                plan_id:
+                  type: integer
+                  description: ID del plan a comprar (1=Silver, 2=Gold, 3=Legend)
+                  example: 2
+                periodo:
+                  type: string
+                  enum: ['mensual', 'anual']
+                  default: 'mensual'
+                  example: "mensual"
+                success_url:
+                  type: string
+                  format: uri
+                  example: "https://epic-things.com/payment/success"
+                cancel_url:
+                  type: string
+                  format: uri
+                  example: "https://epic-things.com/payment/cancel"
+      responses:
+        '200':
+          description: Sesión de checkout creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkout_url:
+                    type: string
+                    format: uri
+                    example: "https://checkout.stripe.com/pay/..."
+                  session_id:
+                    type: string
+                    example: "cs_test_xxxxxxxx"
+        '400':
+          description: Error de validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No autenticado
+        '409':
+          description: Ya tiene una suscripción activa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================================
+  # WEBHOOKS (STRIPE)
+  # ============================================================
+
+  /webhook:
+    post:
+      tags:
+        - Webhooks
+      summary: Webhook de Stripe
+      description: Endpoint que recibe eventos de Stripe (pagos, suscripciones, reembolsos)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Evento de Stripe
+      responses:
+        '200':
+          description: Webhook procesado exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                    example: true
+        '401':
+          description: Firma inválida
+        '500':
+          description: Error procesando el webhook
+
+  # ============================================================
+  # FACTURACIÓN
+  # ============================================================
+
+  /invoices:
+    get:
+      tags:
+        - Facturación
+      summary: Listar facturas del usuario
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Lista de facturas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invoice'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /invoices/{id_invoice}/download:
+    get:
+      tags:
+        - Facturación
+      summary: Descargar factura en PDF
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id_invoice
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "in_123456"
+      responses:
+        '200':
+          description: Archivo PDF de la factura
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Factura no encontrada
+
+  # ============================================================
+  # REGALÍAS (CREADORES)
+  # ============================================================
+
+  /royalties:
+    get:
+      tags:
+        - Regalías
+      summary: Obtener resumen de regalías del creador
+      description: Muestra ingresos generados por los juegos del creador
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+            example: 2026
+          description: Año a consultar
+        - name: month
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+          description: Mes a consultar
+      responses:
+        '200':
+          description: Resumen de regalías
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoyaltiesSummary'
+        '403':
+          description: Sin permisos (no es creador)
+        '401':
+          description: No autenticado
+
+  /royalties/details:
+    get:
+      tags:
+        - Regalías
+      summary: Detalle de regalías por juego
+      description: Muestra ingresos generados por cada juego del creador
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+          description: Año a consultar
+        - name: month
+          in: query
+          schema:
+            type: integer
+          description: Mes a consultar
+      responses:
+        '200':
+          description: Detalle de regalías por juego
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RoyaltiesDetail'
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+        error:
+          type: string
+        message:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        pages:
+          type: integer
+
+    Plan:
+      type: object
+      properties:
+        id_plan:
+          type: integer
+          example: 2
+        nombre:
+          type: string
+          example: "Gold"
+        descripcion:
+          type: string
+          example: "Plan para creadores de juegos"
+        precio_mensual:
+          type: number
+          example: 15.00
+        precio_anual:
+          type: number
+          example: 150.00
+        caracteristicas:
+          type: array
+          items:
+            type: string
+          example: ["Todo Silver", "Crear juegos", "Subir juegos", "Regalías 70%"]
+        nivel:
+          type: integer
+          example: 3
+        activo:
+          type: boolean
+          example: true
+
+    Subscription:
+      type: object
+      properties:
+        id_suscripcion:
+          type: integer
+          example: 789
+        plan:
+          $ref: '#/components/schemas/Plan'
+        fecha_inicio:
+          type: string
+          format: date-time
+          example: "2026-09-01T12:00:00Z"
+        fecha_fin:
+          type: string
+          format: date-time
+          example: "2026-10-01T12:00:00Z"
+        estado:
+          type: string
+          enum: ['activa', 'cancelada', 'vencida', 'pendiente']
+          example: "activa"
+        periodo:
+          type: string
+          enum: ['mensual', 'anual']
+          example: "mensual"
+        dias_restantes:
+          type: integer
+          example: 30
+
+    SubscriptionHistory:
+      type: object
+      properties:
+        id_suscripcion:
+          type: integer
+        plan:
+          type: object
+          properties:
+            nombre:
+              type: string
+            precio_mensual:
+              type: number
+        fecha_inicio:
+          type: string
+          format: date-time
+        fecha_fin:
+          type: string
+          format: date-time
+        estado:
+          type: string
+        periodo:
+          type: string
+
+    Invoice:
+      type: object
+      properties:
+        id_invoice:
+          type: string
+          example: "in_123456"
+        monto:
+          type: number
+          example: 15.00
+        moneda:
+          type: string
+          example: "USD"
+        fecha:
+          type: string
+          format: date-time
+          example: "2026-09-01T12:00:00Z"
+        estado:
+          type: string
+          enum: ['pagado', 'pendiente', 'fallido']
+          example: "pagado"
+        plan:
+          type: string
+          example: "Gold"
+        url_pdf:
+          type: string
+          format: uri
+          example: "https://stripe.com/invoice/123.pdf"
+
+    RoyaltiesSummary:
+      type: object
+      properties:
+        periodo:
+          type: object
+          properties:
+            mes:
+              type: integer
+            año:
+              type: integer
+        total_ingresos:
+          type: number
+          example: 1250.50
+        total_juegos_activos:
+          type: integer
+          example: 5
+        total_suscriptores:
+          type: integer
+          example: 78
+        juegos_top:
+          type: array
+          items:
+            type: object
+            properties:
+              id_juego:
+                type: integer
+              titulo:
+                type: string
+              ingresos:
+                type: number
+              suscriptores:
+                type: integer
+
+    RoyaltiesDetail:
+      type: object
+      properties:
+        id_juego:
+          type: integer
+        titulo:
+          type: string
+        ingresos_totales:
+          type: number
+        suscriptores_unicos:
+          type: integer
+        comision_plataforma:
+          type: number
+          description: 30% de la plataforma
+        regalia_creador:
+          type: number
+          description: 70% para el creador
+        transacciones:
+          type: array
+          items:
+            type: object
+            properties:
+              fecha:
+                type: string
+                format: date-time
+              usuario:
+                type: string
+              monto:
+                type: number

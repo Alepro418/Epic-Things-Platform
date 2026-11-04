@@ -1,0 +1,159 @@
+@startuml
+' Título del diagrama
+title "Casos de Uso - Epic Things Platform"
+
+' Definición de actores (con iconos)
+actor "Explorador\n(Free)" as Explorador #LightBlue
+actor "Jugador\n(Silver)" as Jugador #LightGreen
+actor "Creador\n(Gold)" as Creador #Gold
+actor "Mecenas\n(Legend)" as Mecenas #Purple
+actor "Administrador" as Admin #Red
+
+' ============================================
+' CASOS DE USO POR MÓDULO
+' ============================================
+
+' ---------- Módulo de Autenticación ----------
+rectangle "Autenticación" {
+    usecase "Registrarse" as UC01
+    usecase "Iniciar sesión" as UC02
+    usecase "Cerrar sesión" as UC03
+    usecase "Recuperar contraseña" as UC04
+    usecase "Actualizar perfil" as UC05
+}
+
+' ---------- Módulo de Juegos ----------
+rectangle "Juegos" {
+    usecase "Ver catálogo de juegos" as UC06
+    usecase "Buscar juegos" as UC07
+    usecase "Jugar juego gratuito" as UC08
+    usecase "Jugar juego premium" as UC09
+    usecase "Ver tabla de clasificación" as UC10
+    usecase "Guardar juego favorito" as UC11
+    usecase "Crear juego (HTML5/Unity)" as UC12
+    usecase "Subir juego a la plataforma" as UC13
+    usecase "Gestionar juegos propios" as UC14
+    usecase "Ver métricas del juego" as UC15
+}
+
+' ---------- Módulo de Suscripciones ----------
+rectangle "Suscripciones" {
+    usecase "Ver planes disponibles" as UC16
+    usecase "Suscribirse a Silver" as UC17
+    usecase "Suscribirse a Gold" as UC18
+    usecase "Suscribirse a Legend" as UC19
+    usecase "Cancelar suscripción" as UC20
+    usecase "Gestionar método de pago" as UC21
+    usecase "Ver historial de pagos" as UC22
+}
+
+' ---------- Módulo de Comunidad ----------
+rectangle "Comunidad" {
+    usecase "Comentar en juego" as UC23
+    usecase "Valorar juego" as UC24
+    usecase "Reportar problema" as UC25
+    usecase "Participar en foros" as UC26
+    usecase "Ver perfil de creador" as UC27
+}
+
+' ---------- Módulo de Administración ----------
+rectangle "Administración" {
+    usecase "Gestionar usuarios" as UC28
+    usecase "Gestionar juegos" as UC29
+    usecase "Gestionar suscripciones" as UC30
+    usecase "Ver métricas globales" as UC31
+    usecase "Gestionar reportes" as UC32
+}
+
+' ============================================
+' RELACIONES ACTOR - CASO DE USO
+' ============================================
+
+' ---------- Explorador (Free) ----------
+Explorador --> UC01
+Explorador --> UC02
+Explorador --> UC03
+Explorador --> UC04
+Explorador --> UC05
+Explorador --> UC06
+Explorador --> UC07
+Explorador --> UC08
+Explorador --> UC10
+
+' ---------- Jugador (Silver) ----------
+Jugador --> UC09
+Jugador --> UC11
+Jugador --> UC16
+Jugador --> UC17
+Jugador --> UC20
+Jugador --> UC21
+Jugador --> UC22
+Jugador --> UC23
+Jugador --> UC24
+Jugador --> UC25
+Jugador --> UC26
+Jugador --> UC27
+
+' ---------- Creador (Gold) ----------
+Creador --> UC12
+Creador --> UC13
+Creador --> UC14
+Creador --> UC15
+Creador --> UC18
+Creador --> UC20
+Creador --> UC21
+Creador --> UC22
+
+' ---------- Mecenas (Legend) ----------
+Mecenas --> UC19
+Mecenas --> UC20
+Mecenas --> UC21
+Mecenas --> UC22
+Mecenas --> UC23
+Mecenas --> UC24
+Mecenas --> UC26
+Mecenas --> UC27
+
+' ---------- Administrador ----------
+Admin --> UC28
+Admin --> UC29
+Admin --> UC30
+Admin --> UC31
+Admin --> UC32
+
+' ============================================
+' RELACIONES DE HERENCIA/EXTENSIÓN
+' ============================================
+
+' Los roles superiores heredan los casos de uso de los inferiores
+Jugador .|> Explorador : <<extend>>
+Creador .|> Jugador : <<extend>>
+Mecenas .|> Creador : <<extend>>
+
+' Casos de uso que extienden a otros
+UC09 .> UC08 : <<extend>>
+UC13 .> UC12 : <<extend>>
+
+' ============================================
+' NOTAS ADICIONALES
+' ============================================
+
+note right of UC12
+  El creador puede crear juegos usando:
+  - HTML5 + Phaser (recomendado para principiantes)
+  - Unity (para juegos más complejos)
+end note
+
+note right of UC13
+  Los juegos subidos pasan por un proceso
+  de revisión antes de ser publicados.
+end note
+
+note bottom of UC28
+  El administrador puede:
+  - Bloquear/desbloquear usuarios
+  - Asignar roles especiales
+  - Ver logs de actividad
+end note
+
+@enduml

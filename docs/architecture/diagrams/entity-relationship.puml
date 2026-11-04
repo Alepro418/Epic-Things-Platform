@@ -1,0 +1,977 @@
+================================================================================
+                    MODELO ENTIDAD-RELACIÓN (MER)
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+ÍNDICE
+--------------------------------------------------------------------------------
+1.  ENTIDADES Y RELACIONES (Vista General)
+2.  DEFINICIÓN DETALLADA DE TABLAS
+3.  DIAGRAMA PLANTUML
+4.  TABLA DE RELACIONES PRINCIPALES
+5.  CONSIDERACIONES DE SEGURIDAD
+6.  SCRIPT SQL COMPLETO
+
+
+================================================================================
+1. ENTIDADES Y RELACIONES (VISTA GENERAL)
+================================================================================
+
+┌─────────────────┐          ┌─────────────────┐          ┌─────────────────┐
+│     USUARIOS     │1       N│    ROLES         │1       N│   PERMISOS      │
+│─────────────────│──────────│─────────────────│──────────│─────────────────│
+│ id_usuario (PK) │          │ id_rol (PK)     │          │ id_permiso (PK) │
+│ username        │          │ nombre_rol      │          │ nombre_permiso  │
+│ email           │          │ descripcion     │          │ descripcion     │
+│ password_hash   │          │ nivel (1-5)     │          │                  │
+│ nombre_completo │          └─────────────────┘          └─────────────────┘
+│ fecha_registro  │
+│ avatar_url      │
+│ activo          │
+└────────┬────────┘
+         │
+         │ 1
+         │
+         │ N
+┌────────▼────────┐          ┌─────────────────┐
+│  PERFILES       │1       N│   JUEGOS        │
+│─────────────────│──────────│─────────────────│
+│ id_perfil (PK)  │          │ id_juego (PK)   │
+│ id_usuario (FK) │          │ titulo          │
+│ biografia       │          │ descripcion     │
+│ sitio_web       │          │ categoria       │
+│ redes_sociales  │          │ tipo (HTML5/Unity)│
+└─────────────────┘          │ url_archivo     │
+                              │ url_imagen      │
+                              │ precio (0=gratis)│
+                              │ estado (borrador/pendiente/publicado/rechazado)│
+                              │ fecha_creacion  │
+                              │ fecha_publicacion│
+                              │ id_creador (FK) │
+                              │ descargas       │
+                              │ puntuacion_media│
+                              └────────┬────────┘
+                                       │
+                                       │ 1
+                                       │
+                                       │ N
+                              ┌────────▼────────┐
+                              │  SUSCRIPCIONES  │
+                              │─────────────────│
+                              │ id_suscripcion (PK)│
+                              │ id_usuario (FK) │
+                              │ id_plan (FK)    │
+                              │ fecha_inicio    │
+                              │ fecha_fin       │
+                              │ estado (activa/cancelada/vencida)│
+                              └────────┬────────┘
+                                       │
+                                       │ N
+                                       │
+                                       │ 1
+                              ┌────────▼────────┐
+                              │   PLANES        │
+                              │─────────────────│
+                              │ id_plan (PK)    │
+                              │ nombre_plan     │
+                              │ descripcion     │
+                              │ precio_mensual  │
+                              │ caracteristicas │
+                              │ nivel (1-4)     │
+                              │ activo          │
+                              └─────────────────┘
+
+
+================================================================================
+2. DEFINICIÓN DETALLADA DE TABLAS
+================================================================================
+
+--------------------------------------------------------------------------------
+2.1. TABLA: usuarios
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_usuario          INT             Identificador único             PK, AUTO_INCREMENT
+username            VARCHAR(50)     Nombre de usuario único         UNIQUE, NOT NULL
+email               VARCHAR(100)    Correo electrónico              UNIQUE, NOT NULL
+password_hash       VARCHAR(255)    Hash de la contraseña           NOT NULL
+nombre_completo     VARCHAR(100)    Nombre real del usuario         NOT NULL
+fecha_registro      DATETIME        Fecha y hora de registro        DEFAULT CURRENT_TIMESTAMP
+avatar_url          VARCHAR(255)    URL del avatar                  NULL
+activo              BOOLEAN         ¿El usuario está activo?        DEFAULT TRUE
+email_verificado    BOOLEAN         ¿Email confirmado?              DEFAULT FALSE
+ultimo_acceso       DATETIME        Última vez que inició sesión    NULL
+
+ÍNDICES:
+  - username (UNIQUE)
+  - email (UNIQUE)
+  - activo
+
+--------------------------------------------------------------------------------
+2.2. TABLA: roles
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_rol              INT             Identificador único             PK, AUTO_INCREMENT
+nombre_rol          VARCHAR(50)     Nombre del rol                  UNIQUE, NOT NULL
+descripcion         TEXT            Descripción del rol             NULL
+nivel               INT             Nivel de acceso (1-5)           NOT NULL, DEFAULT 1
+
+ROLES PREDEFINIDOS:
+  id_rol  nombre_rol      nivel  descripcion
+  ------  -------------  -----  ------------------------------------------------
+  1       Explorador     1      Usuario gratuito
+  2       Jugador        2      Usuario Silver (suscriptor)
+  3       Creador        3      Usuario Gold (creador de juegos)
+  4       Mecenas        4      Usuario Legend (soporte especial)
+  5       Administrador  5      Gestión de la plataforma
+
+--------------------------------------------------------------------------------
+2.3. TABLA: permisos
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_permiso          INT             Identificador único             PK, AUTO_INCREMENT
+nombre_permiso      VARCHAR(100)    Nombre del permiso              UNIQUE, NOT NULL
+descripcion         TEXT            Descripción del permiso         NULL
+categoria           VARCHAR(50)     Categoría del permiso           NULL
+
+PERMISOS PREDEFINIDOS:
+  id_permiso  nombre_permiso           categoria   descripcion
+  ----------  -----------------------  ----------  ------------------------------------------------
+  1           crear_juego              Juegos      Puede crear nuevos juegos
+  2           subir_juego              Juegos      Puede subir juegos a la plataforma
+  3           gestionar_juegos         Juegos      Puede gestionar sus propios juegos
+  4           ver_metricas             Juegos      Puede ver métricas de sus juegos
+  5           jugar_premium            Juegos      Puede jugar juegos premium
+  6           comentar                 Comunidad   Puede comentar en juegos
+  7           valorar                  Comunidad   Puede valorar juegos
+  8           reportar                 Comunidad   Puede reportar contenido
+  9           gestionar_usuarios       Admin       Puede gestionar usuarios
+  10          gestionar_juegos_admin   Admin       Puede gestionar todos los juegos
+  11          ver_metricas_globales    Admin       Puede ver métricas globales
+
+--------------------------------------------------------------------------------
+2.4. TABLA: usuarios_roles (Relación N:M)
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_usuario          INT             ID del usuario                  PK, FK (usuarios.id_usuario)
+id_rol              INT             ID del rol                      PK, FK (roles.id_rol)
+fecha_asignacion    DATETIME        Fecha de asignación del rol     DEFAULT CURRENT_TIMESTAMP
+
+--------------------------------------------------------------------------------
+2.5. TABLA: roles_permisos (Relación N:M)
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_rol              INT             ID del rol                      PK, FK (roles.id_rol)
+id_permiso          INT             ID del permiso                  PK, FK (permisos.id_permiso)
+fecha_asignacion    DATETIME        Fecha de asignación del permiso DEFAULT CURRENT_TIMESTAMP
+
+--------------------------------------------------------------------------------
+2.6. TABLA: juegos
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_juego            INT             Identificador único             PK, AUTO_INCREMENT
+titulo              VARCHAR(150)    Título del juego                NOT NULL
+descripcion         TEXT            Descripción del juego           NULL
+categoria           VARCHAR(50)     Categoría del juego             NOT NULL
+tipo                ENUM            Tipo de juego ('html5','unity','webgl') NOT NULL
+url_archivo         VARCHAR(255)    URL del archivo del juego       NOT NULL
+url_imagen          VARCHAR(255)    URL de la imagen de portada     NULL
+url_demo            VARCHAR(255)    URL de una demo del juego       NULL
+precio              DECIMAL(10,2)   Precio (0 = gratuito)           DEFAULT 0.00
+estado              ENUM            Estado del juego                DEFAULT 'borrador'
+                                    ('borrador','pendiente','publicado','rechazado')
+fecha_creacion      DATETIME        Fecha de creación               DEFAULT CURRENT_TIMESTAMP
+fecha_publicacion   DATETIME        Fecha de publicación            NULL
+id_creador          INT             ID del creador del juego        FK (usuarios.id_usuario), NOT NULL
+descargas           INT             Número de descargas             DEFAULT 0
+puntuacion_media    DECIMAL(3,2)    Puntuación media (0-5)          DEFAULT 0.00
+visitas             INT             Número de visitas               DEFAULT 0
+tiempo_jugado_total INT             Tiempo total jugado (segundos)  DEFAULT 0
+
+ÍNDICES:
+  - estado
+  - categoria
+  - id_creador (FK)
+  - puntuacion_media (para ordenamiento)
+
+--------------------------------------------------------------------------------
+2.7. TABLA: planes
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_plan             INT             Identificador único             PK, AUTO_INCREMENT
+nombre_plan         VARCHAR(50)     Nombre del plan                 NOT NULL
+descripcion         TEXT            Descripción del plan            NULL
+precio_mensual      DECIMAL(10,2)   Precio mensual                  NOT NULL
+precio_anual        DECIMAL(10,2)   Precio anual (descuento)        NULL
+caracteristicas     JSON            Lista de características        NOT NULL
+nivel               INT             Nivel de acceso (1-4)           NOT NULL
+activo              BOOLEAN         ¿Plan activo?                   DEFAULT TRUE
+
+PLANES PREDEFINIDOS:
+  id_plan  nombre   precio_mensual  nivel  caracteristicas
+  -------  -------  --------------  -----  ------------------------------------------------
+  1        Silver   5.00            2      ["Sin anuncios", "Juegos premium", "Tablas de clasificación"]
+  2        Gold     15.00           3      ["Todo Silver", "Crear juegos", "Subir juegos", "Regalías 70%"]
+  3        Legend   30.00           4      ["Todo Gold", "Juegos en beta", "Voto en desarrollo", "Reconocimiento"]
+
+--------------------------------------------------------------------------------
+2.8. TABLA: suscripciones
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_suscripcion      INT             Identificador único             PK, AUTO_INCREMENT
+id_usuario          INT             ID del usuario                  FK (usuarios.id_usuario), NOT NULL
+id_plan             INT             ID del plan                     FK (planes.id_plan), NOT NULL
+id_transaccion      INT             ID de la transacción de pago    FK (transacciones.id_transaccion), NULL
+fecha_inicio        DATETIME        Fecha de inicio de la suscripción NOT NULL
+fecha_fin           DATETIME        Fecha de fin de la suscripción  NOT NULL
+estado              ENUM            Estado de la suscripción        DEFAULT 'activa'
+                                    ('activa','cancelada','vencida','pendiente')
+periodo             ENUM            Periodo de facturación          DEFAULT 'mensual'
+                                    ('mensual','anual')
+
+ÍNDICES:
+  - id_usuario (FK)
+  - id_plan (FK)
+  - estado
+  - fecha_fin (para notificaciones de renovación)
+
+--------------------------------------------------------------------------------
+2.9. TABLA: transacciones
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_transaccion      INT             Identificador único             PK, AUTO_INCREMENT
+id_usuario          INT             ID del usuario                  FK (usuarios.id_usuario), NOT NULL
+id_suscripcion      INT             ID de la suscripción            FK (suscripciones.id_suscripcion), NULL
+monto               DECIMAL(10,2)   Monto de la transacción         NOT NULL
+moneda              VARCHAR(3)      Código de moneda (USD, EUR)     DEFAULT 'USD'
+metodo_pago         VARCHAR(50)     Método de pago                  NOT NULL
+                                    ('stripe','paypal', etc.)
+id_pago_externo     VARCHAR(255)    ID del pago en sistema externo  NULL
+estado              ENUM            Estado de la transacción        DEFAULT 'pendiente'
+                                    ('pendiente','completada','fallida','reembolsada')
+fecha_transaccion   DATETIME        Fecha de la transacción         DEFAULT CURRENT_TIMESTAMP
+descripcion         VARCHAR(255)    Descripción de la transacción   NULL
+
+ÍNDICES:
+  - id_usuario (FK)
+  - id_suscripcion (FK)
+  - estado
+
+--------------------------------------------------------------------------------
+2.10. TABLA: valoraciones
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_valoracion       INT             Identificador único             PK, AUTO_INCREMENT
+id_usuario          INT             ID del usuario                  FK (usuarios.id_usuario), NOT NULL
+id_juego            INT             ID del juego                    FK (juegos.id_juego), NOT NULL
+puntuacion          INT             Puntuación (1-5)                NOT NULL, CHECK (puntuacion BETWEEN 1 AND 5)
+comentario          TEXT            Comentario del usuario          NULL
+fecha_valoracion    DATETIME        Fecha de la valoración          DEFAULT CURRENT_TIMESTAMP
+
+ÍNDICES:
+  - id_usuario (FK)
+  - id_juego (FK)
+  - UNIQUE (id_usuario, id_juego) → Un usuario solo puede valorar un juego una vez
+
+--------------------------------------------------------------------------------
+2.11. TABLA: reportes
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_reporte          INT             Identificador único             PK, AUTO_INCREMENT
+id_usuario_reportante INT           ID del usuario que reporta      FK (usuarios.id_usuario), NOT NULL
+id_juego_reportado  INT             ID del juego reportado          FK (juegos.id_juego), NULL
+id_usuario_reportado INT            ID del usuario reportado        FK (usuarios.id_usuario), NULL
+tipo                ENUM            Tipo de reporte                 NOT NULL
+                                    ('juego','comentario','usuario')
+motivo              VARCHAR(255)    Motivo del reporte              NOT NULL
+descripcion         TEXT            Descripción detallada           NULL
+estado              ENUM            Estado del reporte              DEFAULT 'pendiente'
+                                    ('pendiente','revisado','resuelto','rechazado')
+fecha_reporte       DATETIME        Fecha del reporte               DEFAULT CURRENT_TIMESTAMP
+
+ÍNDICES:
+  - id_usuario_reportante (FK)
+  - id_juego_reportado (FK)
+  - id_usuario_reportado (FK)
+  - estado
+
+--------------------------------------------------------------------------------
+2.12. TABLA: logs_actividad
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_log              BIGINT          Identificador único             PK, AUTO_INCREMENT
+id_usuario          INT             ID del usuario (NULL si anónimo) FK (usuarios.id_usuario), NULL
+accion              VARCHAR(100)    Acción realizada                NOT NULL
+detalles            JSON            Detalles de la acción           NULL
+ip_usuario          VARCHAR(45)     Dirección IP del usuario        NULL
+user_agent          VARCHAR(255)    User-Agent del navegador        NULL
+fecha_accion        DATETIME        Fecha de la acción              DEFAULT CURRENT_TIMESTAMP
+
+ÍNDICES:
+  - id_usuario (FK)
+  - accion
+  - fecha_accion (para consultas temporales)
+
+--------------------------------------------------------------------------------
+2.13. TABLA: juegos_favoritos
+--------------------------------------------------------------------------------
+Campo               Tipo            Descripción                     Restricciones
+------------------  --------------  ------------------------------  -------------------------------
+id_usuario          INT             ID del usuario                  PK, FK (usuarios.id_usuario)
+id_juego            INT             ID del juego                    PK, FK (juegos.id_juego)
+fecha_agregado      DATETIME        Fecha de agregado               DEFAULT CURRENT_TIMESTAMP
+
+
+================================================================================
+3. DIAGRAMA PLANTUML
+================================================================================
+
+@startuml
+' Título del diagrama
+title "Modelo Entidad-Relación - Epic Things Platform"
+
+' Definición de entidades
+entity "usuarios" as usuarios {
+    * id_usuario : INT <<PK>>
+    --
+    * username : VARCHAR(50) <<UK>>
+    * email : VARCHAR(100) <<UK>>
+    * password_hash : VARCHAR(255)
+    * nombre_completo : VARCHAR(100)
+    fecha_registro : DATETIME
+    avatar_url : VARCHAR(255)
+    activo : BOOLEAN
+    email_verificado : BOOLEAN
+    ultimo_acceso : DATETIME
+}
+
+entity "roles" as roles {
+    * id_rol : INT <<PK>>
+    --
+    * nombre_rol : VARCHAR(50) <<UK>>
+    descripcion : TEXT
+    * nivel : INT
+}
+
+entity "permisos" as permisos {
+    * id_permiso : INT <<PK>>
+    --
+    * nombre_permiso : VARCHAR(100) <<UK>>
+    descripcion : TEXT
+    categoria : VARCHAR(50)
+}
+
+entity "usuarios_roles" as usuarios_roles {
+    * id_usuario : INT <<PK>> <<FK>>
+    * id_rol : INT <<PK>> <<FK>>
+    --
+    fecha_asignacion : DATETIME
+}
+
+entity "roles_permisos" as roles_permisos {
+    * id_rol : INT <<PK>> <<FK>>
+    * id_permiso : INT <<PK>> <<FK>>
+    --
+    fecha_asignacion : DATETIME
+}
+
+entity "juegos" as juegos {
+    * id_juego : INT <<PK>>
+    --
+    * titulo : VARCHAR(150)
+    descripcion : TEXT
+    categoria : VARCHAR(50)
+    * tipo : ENUM('html5','unity','webgl')
+    * url_archivo : VARCHAR(255)
+    url_imagen : VARCHAR(255)
+    url_demo : VARCHAR(255)
+    precio : DECIMAL(10,2)
+    estado : ENUM('borrador','pendiente','publicado','rechazado')
+    fecha_creacion : DATETIME
+    fecha_publicacion : DATETIME
+    * id_creador : INT <<FK>>
+    descargas : INT
+    puntuacion_media : DECIMAL(3,2)
+    visitas : INT
+    tiempo_jugado_total : INT
+}
+
+entity "planes" as planes {
+    * id_plan : INT <<PK>>
+    --
+    * nombre_plan : VARCHAR(50)
+    descripcion : TEXT
+    * precio_mensual : DECIMAL(10,2)
+    precio_anual : DECIMAL(10,2)
+    * caracteristicas : JSON
+    * nivel : INT
+    activo : BOOLEAN
+}
+
+entity "suscripciones" as suscripciones {
+    * id_suscripcion : INT <<PK>>
+    --
+    * id_usuario : INT <<FK>>
+    * id_plan : INT <<FK>>
+    id_transaccion : INT <<FK>>
+    * fecha_inicio : DATETIME
+    * fecha_fin : DATETIME
+    estado : ENUM('activa','cancelada','vencida','pendiente')
+    periodo : ENUM('mensual','anual')
+}
+
+entity "transacciones" as transacciones {
+    * id_transaccion : INT <<PK>>
+    --
+    * id_usuario : INT <<FK>>
+    id_suscripcion : INT <<FK>>
+    * monto : DECIMAL(10,2)
+    moneda : VARCHAR(3)
+    * metodo_pago : VARCHAR(50)
+    id_pago_externo : VARCHAR(255)
+    estado : ENUM('pendiente','completada','fallida','reembolsada')
+    fecha_transaccion : DATETIME
+    descripcion : VARCHAR(255)
+}
+
+entity "valoraciones" as valoraciones {
+    * id_valoracion : INT <<PK>>
+    --
+    * id_usuario : INT <<FK>>
+    * id_juego : INT <<FK>>
+    * puntuacion : INT (1-5)
+    comentario : TEXT
+    fecha_valoracion : DATETIME
+}
+
+entity "reportes" as reportes {
+    * id_reporte : INT <<PK>>
+    --
+    * id_usuario_reportante : INT <<FK>>
+    id_juego_reportado : INT <<FK>>
+    id_usuario_reportado : INT <<FK>>
+    * tipo : ENUM('juego','comentario','usuario')
+    * motivo : VARCHAR(255)
+    descripcion : TEXT
+    estado : ENUM('pendiente','revisado','resuelto','rechazado')
+    fecha_reporte : DATETIME
+}
+
+entity "logs_actividad" as logs_actividad {
+    * id_log : BIGINT <<PK>>
+    --
+    id_usuario : INT <<FK>>
+    * accion : VARCHAR(100)
+    detalles : JSON
+    ip_usuario : VARCHAR(45)
+    user_agent : VARCHAR(255)
+    fecha_accion : DATETIME
+}
+
+entity "juegos_favoritos" as juegos_favoritos {
+    * id_usuario : INT <<PK>> <<FK>>
+    * id_juego : INT <<PK>> <<FK>>
+    --
+    fecha_agregado : DATETIME
+}
+
+' Relaciones
+usuarios ||--o{ usuarios_roles : tiene
+roles ||--o{ usuarios_roles : "asignado a"
+roles ||--o{ roles_permisos : tiene
+permisos ||--o{ roles_permisos : "asignado a"
+
+usuarios ||--o{ juegos : crea
+usuarios ||--o{ suscripciones : tiene
+planes ||--o{ suscripciones : "es parte de"
+usuarios ||--o{ transacciones : realiza
+suscripciones ||--o{ transacciones : genera
+
+usuarios ||--o{ valoraciones : hace
+juegos ||--o{ valoraciones : recibe
+
+usuarios ||--o{ reportes : "reporta (como reportante)"
+juegos ||--o{ reportes : "es reportado"
+usuarios ||--o{ reportes : "es reportado"
+
+usuarios ||--o{ logs_actividad : genera
+
+usuarios ||--o{ juegos_favoritos : tiene
+juegos ||--o{ juegos_favoritos : "es favorito"
+
+' Notas adicionales
+note right of juegos
+  - Los juegos con precio = 0 son gratuitos.
+  - Estado 'pendiente' = esperando revisión.
+  - Los creadores pueden ver métricas de sus juegos.
+end note
+
+note right of suscripciones
+  - Una suscripción activa da acceso a juegos premium.
+  - Al expirar, el usuario vuelve a nivel Explorador.
+end note
+
+@enduml
+
+
+================================================================================
+4. TABLA DE RELACIONES PRINCIPALES
+================================================================================
+
+Relación                       Tipo    Descripción
+------------------------------ ------- ------------------------------------------
+usuarios → roles               N:M     Un usuario puede tener múltiples roles
+                                        (a través de usuarios_roles)
+roles → permisos               N:M     Un rol puede tener múltiples permisos
+                                        (a través de roles_permisos)
+usuarios → juegos              1:N     Un usuario (creador) puede crear
+                                        múltiples juegos
+usuarios → suscripciones       1:N     Un usuario puede tener múltiples
+                                        suscripciones (historial)
+planes → suscripciones         1:N     Un plan puede estar asociado a
+                                        múltiples suscripciones
+usuarios → valoraciones        1:N     Un usuario puede hacer múltiples
+                                        valoraciones
+juegos → valoraciones          1:N     Un juego puede recibir múltiples
+                                        valoraciones
+usuarios → reportes            1:N     Un usuario puede reportar múltiples
+                                        contenidos
+juegos → reportes              1:N     Un juego puede ser reportado
+                                        múltiples veces
+usuarios → juegos_favoritos    1:N     Un usuario puede tener múltiples
+                                        juegos favoritos
+juegos → juegos_favoritos      1:N     Un juego puede ser favorito de
+                                        múltiples usuarios
+
+
+================================================================================
+5. CONSIDERACIONES DE SEGURIDAD
+================================================================================
+
+1. CONTRASEÑAS:
+   - Almacenar usando bcrypt o Argon2 (nunca en texto plano).
+   - Longitud mínima: 8 caracteres.
+
+2. DATOS SENSIBLES:
+   - NO exponer en APIs: password_hash, id_pago_externo, datos de tarjetas.
+   - Utilizar DTOs (Data Transfer Objects) para ocultar campos sensibles.
+
+3. LOGS:
+   - NO almacenar información sensible en logs_actividad.
+   - Ejemplos de lo que NO debe ir en logs: contraseñas, tokens, datos de pago.
+
+4. AUDITORÍA:
+   - Mantener registros de acciones críticas:
+     * Cambios de rol.
+     * Cambios de estado de suscripción.
+     * Publicación/eliminación de juegos.
+     * Acciones de administración.
+
+5. VALIDACIONES:
+   - Validar todos los inputs en el backend (nunca confiar solo en el frontend).
+   - Sanitizar entradas para prevenir inyecciones SQL y XSS.
+
+6. ROLES Y PERMISOS:
+   - Principio de mínimo privilegio: cada usuario solo tiene los permisos necesarios.
+   - Revalidar permisos en cada solicitud al backend.
+
+
+================================================================================
+6. SCRIPT SQL COMPLETO
+================================================================================
+
+-- =============================================================================
+-- SCRIPT SQL PARA CREAR LA BASE DE DATOS
+-- EPIC THINGS PLATFORM v1.0
+-- Base de datos: PostgreSQL
+-- =============================================================================
+
+-- Crear la base de datos (ejecutar si no existe)
+-- CREATE DATABASE epic_things_platform;
+
+-- Conectar a la base de datos
+-- \c epic_things_platform;
+
+-- =============================================================================
+-- 1. TABLAS PRINCIPALES
+-- =============================================================================
+
+-- 1.1 Tabla: usuarios
+CREATE TABLE IF NOT EXISTS usuarios (
+    id_usuario SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    nombre_completo VARCHAR(100) NOT NULL,
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    avatar_url VARCHAR(255),
+    activo BOOLEAN DEFAULT TRUE,
+    email_verificado BOOLEAN DEFAULT FALSE,
+    ultimo_acceso TIMESTAMP
+);
+
+-- Índices para usuarios
+CREATE INDEX idx_usuarios_activo ON usuarios(activo);
+
+-- 1.2 Tabla: roles
+CREATE TABLE IF NOT EXISTS roles (
+    id_rol SERIAL PRIMARY KEY,
+    nombre_rol VARCHAR(50) UNIQUE NOT NULL,
+    descripcion TEXT,
+    nivel INT NOT NULL DEFAULT 1
+);
+
+-- Insertar roles predefinidos
+INSERT INTO roles (nombre_rol, descripcion, nivel) VALUES
+    ('Explorador', 'Usuario gratuito', 1),
+    ('Jugador', 'Usuario Silver (suscriptor)', 2),
+    ('Creador', 'Usuario Gold (creador de juegos)', 3),
+    ('Mecenas', 'Usuario Legend (soporte especial)', 4),
+    ('Administrador', 'Gestión de la plataforma', 5)
+ON CONFLICT (nombre_rol) DO NOTHING;
+
+-- 1.3 Tabla: permisos
+CREATE TABLE IF NOT EXISTS permisos (
+    id_permiso SERIAL PRIMARY KEY,
+    nombre_permiso VARCHAR(100) UNIQUE NOT NULL,
+    descripcion TEXT,
+    categoria VARCHAR(50)
+);
+
+-- Insertar permisos predefinidos
+INSERT INTO permisos (nombre_permiso, descripcion, categoria) VALUES
+    ('crear_juego', 'Puede crear nuevos juegos', 'Juegos'),
+    ('subir_juego', 'Puede subir juegos a la plataforma', 'Juegos'),
+    ('gestionar_juegos', 'Puede gestionar sus propios juegos', 'Juegos'),
+    ('ver_metricas', 'Puede ver métricas de sus juegos', 'Juegos'),
+    ('jugar_premium', 'Puede jugar juegos premium', 'Juegos'),
+    ('comentar', 'Puede comentar en juegos', 'Comunidad'),
+    ('valorar', 'Puede valorar juegos', 'Comunidad'),
+    ('reportar', 'Puede reportar contenido', 'Comunidad'),
+    ('gestionar_usuarios', 'Puede gestionar usuarios', 'Admin'),
+    ('gestionar_juegos_admin', 'Puede gestionar todos los juegos', 'Admin'),
+    ('ver_metricas_globales', 'Puede ver métricas globales', 'Admin')
+ON CONFLICT (nombre_permiso) DO NOTHING;
+
+-- 1.4 Tabla: usuarios_roles (Relación N:M)
+CREATE TABLE IF NOT EXISTS usuarios_roles (
+    id_usuario INT NOT NULL,
+    id_rol INT NOT NULL,
+    fecha_asignacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id_usuario, id_rol),
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
+    FOREIGN KEY (id_rol) REFERENCES roles(id_rol) ON DELETE CASCADE
+);
+
+-- 1.5 Tabla: roles_permisos (Relación N:M)
+CREATE TABLE IF NOT EXISTS roles_permisos (
+    id_rol INT NOT NULL,
+    id_permiso INT NOT NULL,
+    fecha_asignacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id_rol, id_permiso),
+    FOREIGN KEY (id_rol) REFERENCES roles(id_rol) ON DELETE CASCADE,
+    FOREIGN KEY (id_permiso) REFERENCES permisos(id_permiso) ON DELETE CASCADE
+);
+
+-- =============================================================================
+-- 2. TABLAS DE NEGOCIO
+-- =============================================================================
+
+-- 2.1 Tabla: juegos
+CREATE TABLE IF NOT EXISTS juegos (
+    id_juego SERIAL PRIMARY KEY,
+    titulo VARCHAR(150) NOT NULL,
+    descripcion TEXT,
+    categoria VARCHAR(50) NOT NULL,
+    tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('html5', 'unity', 'webgl')),
+    url_archivo VARCHAR(255) NOT NULL,
+    url_imagen VARCHAR(255),
+    url_demo VARCHAR(255),
+    precio DECIMAL(10,2) DEFAULT 0.00,
+    estado VARCHAR(20) DEFAULT 'borrador' CHECK (estado IN ('borrador', 'pendiente', 'publicado', 'rechazado')),
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_publicacion TIMESTAMP,
+    id_creador INT NOT NULL,
+    descargas INT DEFAULT 0,
+    puntuacion_media DECIMAL(3,2) DEFAULT 0.00,
+    visitas INT DEFAULT 0,
+    tiempo_jugado_total INT DEFAULT 0,
+    FOREIGN KEY (id_creador) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
+);
+
+-- Índices para juegos
+CREATE INDEX idx_juegos_estado ON juegos(estado);
+CREATE INDEX idx_juegos_categoria ON juegos(categoria);
+CREATE INDEX idx_juegos_creador ON juegos(id_creador);
+CREATE INDEX idx_juegos_puntuacion ON juegos(puntuacion_media);
+
+-- 2.2 Tabla: planes
+CREATE TABLE IF NOT EXISTS planes (
+    id_plan SERIAL PRIMARY KEY,
+    nombre_plan VARCHAR(50) NOT NULL,
+    descripcion TEXT,
+    precio_mensual DECIMAL(10,2) NOT NULL,
+    precio_anual DECIMAL(10,2),
+    caracteristicas JSON NOT NULL,
+    nivel INT NOT NULL,
+    activo BOOLEAN DEFAULT TRUE
+);
+
+-- Insertar planes predefinidos
+INSERT INTO planes (nombre_plan, descripcion, precio_mensual, precio_anual, caracteristicas, nivel) VALUES
+    ('Silver', 'Plan básico para jugadores', 5.00, 50.00, 
+     '["Sin anuncios", "Juegos premium", "Tablas de clasificación"]', 2),
+    ('Gold', 'Plan para creadores de juegos', 15.00, 150.00, 
+     '["Todo Silver", "Crear juegos", "Subir juegos", "Regalías 70%"]', 3),
+    ('Legend', 'Plan para mecenas', 30.00, 300.00, 
+     '["Todo Gold", "Juegos en beta", "Voto en desarrollo", "Reconocimiento"]', 4)
+ON CONFLICT (nombre_plan) DO NOTHING;
+
+-- 2.3 Tabla: suscripciones
+CREATE TABLE IF NOT EXISTS suscripciones (
+    id_suscripcion SERIAL PRIMARY KEY,
+    id_usuario INT NOT NULL,
+    id_plan INT NOT NULL,
+    id_transaccion INT,
+    fecha_inicio TIMESTAMP NOT NULL,
+    fecha_fin TIMESTAMP NOT NULL,
+    estado VARCHAR(20) DEFAULT 'activa' CHECK (estado IN ('activa', 'cancelada', 'vencida', 'pendiente')),
+    periodo VARCHAR(10) DEFAULT 'mensual' CHECK (periodo IN ('mensual', 'anual')),
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
+    FOREIGN KEY (id_plan) REFERENCES planes(id_plan) ON DELETE RESTRICT
+);
+
+-- Índices para suscripciones
+CREATE INDEX idx_suscripciones_usuario ON suscripciones(id_usuario);
+CREATE INDEX idx_suscripciones_plan ON suscripciones(id_plan);
+CREATE INDEX idx_suscripciones_estado ON suscripciones(estado);
+CREATE INDEX idx_suscripciones_fecha_fin ON suscripciones(fecha_fin);
+
+-- 2.4 Tabla: transacciones
+CREATE TABLE IF NOT EXISTS transacciones (
+    id_transaccion SERIAL PRIMARY KEY,
+    id_usuario INT NOT NULL,
+    id_suscripcion INT,
+    monto DECIMAL(10,2) NOT NULL,
+    moneda VARCHAR(3) DEFAULT 'USD',
+    metodo_pago VARCHAR(50) NOT NULL,
+    id_pago_externo VARCHAR(255),
+    estado VARCHAR(20) DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'completada', 'fallida', 'reembolsada')),
+    fecha_transaccion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    descripcion VARCHAR(255),
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
+    FOREIGN KEY (id_suscripcion) REFERENCES suscripciones(id_suscripcion) ON DELETE SET NULL
+);
+
+-- Índices para transacciones
+CREATE INDEX idx_transacciones_usuario ON transacciones(id_usuario);
+CREATE INDEX idx_transacciones_suscripcion ON transacciones(id_suscripcion);
+CREATE INDEX idx_transacciones_estado ON transacciones(estado);
+
+-- Agregar FK de suscripciones a transacciones (relación circular)
+ALTER TABLE suscripciones 
+    ADD CONSTRAINT fk_suscripciones_transaccion 
+    FOREIGN KEY (id_transaccion) REFERENCES transacciones(id_transaccion) ON DELETE SET NULL;
+
+-- =============================================================================
+-- 3. TABLAS DE INTERACCIÓN SOCIAL
+-- =============================================================================
+
+-- 3.1 Tabla: valoraciones
+CREATE TABLE IF NOT EXISTS valoraciones (
+    id_valoracion SERIAL PRIMARY KEY,
+    id_usuario INT NOT NULL,
+    id_juego INT NOT NULL,
+    puntuacion INT NOT NULL CHECK (puntuacion BETWEEN 1 AND 5),
+    comentario TEXT,
+    fecha_valoracion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
+    FOREIGN KEY (id_juego) REFERENCES juegos(id_juego) ON DELETE CASCADE,
+    UNIQUE (id_usuario, id_juego)
+);
+
+-- Índices para valoraciones
+CREATE INDEX idx_valoraciones_usuario ON valoraciones(id_usuario);
+CREATE INDEX idx_valoraciones_juego ON valoraciones(id_juego);
+
+-- 3.2 Tabla: juegos_favoritos
+CREATE TABLE IF NOT EXISTS juegos_favoritos (
+    id_usuario INT NOT NULL,
+    id_juego INT NOT NULL,
+    fecha_agregado TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id_usuario, id_juego),
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
+    FOREIGN KEY (id_juego) REFERENCES juegos(id_juego) ON DELETE CASCADE
+);
+
+-- 3.3 Tabla: reportes
+CREATE TABLE IF NOT EXISTS reportes (
+    id_reporte SERIAL PRIMARY KEY,
+    id_usuario_reportante INT NOT NULL,
+    id_juego_reportado INT,
+    id_usuario_reportado INT,
+    tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('juego', 'comentario', 'usuario')),
+    motivo VARCHAR(255) NOT NULL,
+    descripcion TEXT,
+    estado VARCHAR(20) DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'revisado', 'resuelto', 'rechazado')),
+    fecha_reporte TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (id_usuario_reportante) REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
+    FOREIGN KEY (id_juego_reportado) REFERENCES juegos(id_juego) ON DELETE CASCADE,
+    FOREIGN KEY (id_usuario_reportado) REFERENCES usuarios(id_usuario) ON DELETE CASCADE
+);
+
+-- Índices para reportes
+CREATE INDEX idx_reportes_reportante ON reportes(id_usuario_reportante);
+CREATE INDEX idx_reportes_juego ON reportes(id_juego_reportado);
+CREATE INDEX idx_reportes_usuario ON reportes(id_usuario_reportado);
+CREATE INDEX idx_reportes_estado ON reportes(estado);
+
+-- =============================================================================
+-- 4. TABLAS DE AUDITORÍA
+-- =============================================================================
+
+-- 4.1 Tabla: logs_actividad
+CREATE TABLE IF NOT EXISTS logs_actividad (
+    id_log BIGSERIAL PRIMARY KEY,
+    id_usuario INT,
+    accion VARCHAR(100) NOT NULL,
+    detalles JSON,
+    ip_usuario VARCHAR(45),
+    user_agent VARCHAR(255),
+    fecha_accion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (id_usuario) REFERENCES usuarios(id_usuario) ON DELETE SET NULL
+);
+
+-- Índices para logs
+CREATE INDEX idx_logs_usuario ON logs_actividad(id_usuario);
+CREATE INDEX idx_logs_accion ON logs_actividad(accion);
+CREATE INDEX idx_logs_fecha ON logs_actividad(fecha_accion);
+
+-- =============================================================================
+-- 5. FUNCIONES Y TRIGGERS
+-- =============================================================================
+
+-- 5.1 Función: Actualizar puntuación media de un juego
+CREATE OR REPLACE FUNCTION actualizar_puntuacion_media()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE juegos
+    SET puntuacion_media = (
+        SELECT AVG(puntuacion)::DECIMAL(3,2)
+        FROM valoraciones
+        WHERE id_juego = NEW.id_juego
+    )
+    WHERE id_juego = NEW.id_juego;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger: Actualizar puntuación media al insertar o actualizar una valoración
+CREATE TRIGGER trg_actualizar_puntuacion_media
+AFTER INSERT OR UPDATE ON valoraciones
+FOR EACH ROW
+EXECUTE FUNCTION actualizar_puntuacion_media();
+
+-- 5.2 Función: Registrar logs de actividad
+CREATE OR REPLACE FUNCTION registrar_log()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO logs_actividad (id_usuario, accion, detalles)
+    VALUES (
+        NEW.id_usuario,
+        TG_OP || ' ' || TG_TABLE_NAME,
+        row_to_json(NEW)
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =============================================================================
+-- 6. VISTAS ÚTILES
+-- =============================================================================
+
+-- 6.1 Vista: Usuarios con sus roles
+CREATE OR REPLACE VIEW vista_usuarios_roles AS
+SELECT 
+    u.id_usuario,
+    u.username,
+    u.nombre_completo,
+    u.email,
+    u.activo,
+    STRING_AGG(r.nombre_rol, ', ') AS roles,
+    MAX(r.nivel) AS nivel_maximo
+FROM usuarios u
+LEFT JOIN usuarios_roles ur ON u.id_usuario = ur.id_usuario
+LEFT JOIN roles r ON ur.id_rol = r.id_rol
+GROUP BY u.id_usuario;
+
+-- 6.2 Vista: Juegos con información de creador y valoración
+CREATE OR REPLACE VIEW vista_juegos_completos AS
+SELECT 
+    j.id_juego,
+    j.titulo,
+    j.descripcion,
+    j.categoria,
+    j.tipo,
+    j.precio,
+    j.estado,
+    j.fecha_creacion,
+    j.fecha_publicacion,
+    j.descargas,
+    j.puntuacion_media,
+    j.visitas,
+    u.username AS creador_username,
+    u.nombre_completo AS creador_nombre,
+    COUNT(DISTINCT v.id_valoracion) AS total_valoraciones,
+    COUNT(DISTINCT f.id_usuario) AS total_favoritos
+FROM juegos j
+LEFT JOIN usuarios u ON j.id_creador = u.id_usuario
+LEFT JOIN valoraciones v ON j.id_juego = v.id_juego
+LEFT JOIN juegos_favoritos f ON j.id_juego = f.id_juego
+GROUP BY j.id_juego, u.username, u.nombre_completo;
+
+-- 6.3 Vista: Suscripciones activas
+CREATE OR REPLACE VIEW vista_suscripciones_activas AS
+SELECT 
+    s.id_suscripcion,
+    u.username,
+    u.nombre_completo,
+    p.nombre_plan,
+    s.fecha_inicio,
+    s.fecha_fin,
+    s.periodo,
+    DATEDIFF('day', CURRENT_DATE, s.fecha_fin) AS dias_restantes
+FROM suscripciones s
+JOIN usuarios u ON s.id_usuario = u.id_usuario
+JOIN planes p ON s.id_plan = p.id_plan
+WHERE s.estado = 'activa' AND s.fecha_fin > CURRENT_DATE;
+
+-- =============================================================================
+-- 7. DATOS DE PRUEBA (OPCIONAL)
+-- =============================================================================
+
+-- 7.1 Insertar usuario administrador
+-- NOTA: La contraseña debe ser hasheada con bcrypt. Este es un ejemplo.
+-- INSERT INTO usuarios (username, email, password_hash, nombre_completo)
+-- VALUES ('admin', 'admin@epicthings.com', '$2a$10$hash_generado', 'Administrador');
+
+-- 7.2 Asignar rol de administrador
+-- INSERT INTO usuarios_roles (id_usuario, id_rol)
+-- SELECT u.id_usuario, r.id_rol
+-- FROM usuarios u, roles r
+-- WHERE u.username = 'admin' AND r.nombre_rol = 'Administrador';
+
+-- =============================================================================
+-- FIN DEL SCRIPT
+-- =============================================================================

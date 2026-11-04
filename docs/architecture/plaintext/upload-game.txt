@@ -1,0 +1,99 @@
+================================================================================
+                    DIAGRAMA DE SECUENCIA - SUBIDA DE UN JUEGO
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+FLUJO PRINCIPAL - SUBIDA DE JUEGO EXITOSA
+--------------------------------------------------------------------------------
+
+1.  Creador → Frontend: Inicia subida de nuevo juego (completa formulario de metadatos)
+2.  Frontend → Frontend: Verificar que el usuario tenga rol de Creador (Gold) o superior
+    [No tiene permisos] → Mostrar mensaje "Necesitas ser Creador para subir juegos"
+3.  Frontend → Frontend: Validar que los campos obligatorios estén completos
+4.  Frontend → API Gateway: POST /api/games/upload {titulo, descripcion, categoria, tipo, precio}
+5.  API Gateway → API Gateway: Validar existencia de campos
+6.  API Gateway → Games Service: Reenviar solicitud
+7.  Games Service → Games Service: Sanitizar y validar metadatos
+8.  Games Service → PostgreSQL: SELECT * FROM usuarios WHERE id_usuario = ? AND activo = TRUE
+9.  PostgreSQL → Games Service: Retorna datos del creador
+10. Games Service → PostgreSQL: INSERT INTO juegos (titulo, descripcion, categoria, tipo, precio, estado = 'borrador', id_creador, fecha_creacion)
+11. PostgreSQL → Games Service: Retorna id_juego del nuevo juego
+12. Games Service → API Gateway: {id_juego, upload_url}
+13. API Gateway → Frontend: Reenviar respuesta
+14. Frontend → Frontend: Preparar archivo del juego para subir (comprimir si es necesario)
+15. Frontend → Storage Service: PUT upload_url (archivo del juego)
+16. Storage Service → Storage Service: Guardar archivo en el bucket (generar nombre único)
+17. Storage Service → Frontend: Confirmación de subida {url_archivo, tamaño, hash}
+18. Frontend → API Gateway: PUT /api/games/finalize-upload {id_juego, url_archivo, hash_archivo, tamaño}
+19. API Gateway → Games Service: Reenviar solicitud
+20. Games Service → PostgreSQL: UPDATE juegos SET url_archivo = ?, estado = 'pendiente' WHERE id_juego = ? AND id_creador = ?
+21. PostgreSQL → Games Service: Confirmación de actualización
+22. Games Service → Queue: Publicar evento en cola de revisión {id_juego, titulo, id_creador}
+23. Queue → Games Service: Confirmación de encolado
+24. Games Service → PostgreSQL: INSERT INTO logs_actividad (id_usuario, accion = 'subir_juego', detalles)
+25. PostgreSQL → Games Service: Confirmación de log
+26. Games Service → API Gateway: {id_juego, estado: 'pendiente', message: "Juego enviado a revisión"}
+27. API Gateway → Frontend: Reenviar respuesta
+28. Frontend → Creador: Mostrar mensaje de éxito "Juego subido. Estará disponible tras la revisión."
+
+FLUJO ALTERNATIVO - PROCESO DE REVISIÓN (ADMIN)
+--------------------------------------------------------------------------------
+
+R1. Queue → Games Service: Consumir evento de revisión
+R2. Games Service → PostgreSQL: SELECT * FROM juegos WHERE id_juego = ? AND estado = 'pendiente'
+R3. PostgreSQL → Games Service: Retorna datos del juego
+R4. Games Service → Games Service: Ejecutar validaciones automáticas: verificar archivo, escanear malware, comprobar que es ejecutable
+R5. Games Service → Administrador: Notificar a administradores (para revisión manual)
+R6. Games Service → Queue: Mover a cola de revisión manual (con prioridad)
+
+FLUJO ALTERNATIVO - APROBACIÓN/RECHAZO POR ADMIN
+--------------------------------------------------------------------------------
+
+A1. Administrador → Frontend: Accede a panel de revisión
+A2. Frontend → API Gateway: GET /api/admin/games/pending
+A3. API Gateway → Games Service: Reenviar solicitud
+A4. Games Service → PostgreSQL: SELECT * FROM juegos WHERE estado = 'pendiente'
+A5. PostgreSQL → Games Service: Retorna lista de juegos pendientes
+A6. Games Service → API Gateway: Retorna lista de juegos
+A7. API Gateway → Frontend: Reenviar respuesta
+A8. Frontend → Administrador: Mostrar lista de juegos pendientes
+A9. Administrador → Frontend: Revisa un juego y toma decisión (aprobar/rechazar)
+A10. Administrador → Frontend: Clic en "Aprobar" o "Rechazar"
+A11. Frontend → API Gateway: PUT /api/admin/games/approve-reject {id_juego, decision, comentario}
+A12. API Gateway → Games Service: Reenviar solicitud
+A13. Games Service → Games Service: Verificar que el administrador tenga permisos
+A14. Games Service → PostgreSQL: SELECT * FROM juegos WHERE id_juego = ? AND estado = 'pendiente'
+A15. PostgreSQL → Games Service: Retorna datos del juego
+
+Decisión: Aprobar
+    A16a. Games Service → PostgreSQL: UPDATE juegos SET estado = 'publicado', fecha_publicacion = CURRENT_TIMESTAMP WHERE id_juego = ?
+    A17a. PostgreSQL → Games Service: Confirmación de actualización
+    A18a. Games Service → PostgreSQL: INSERT INTO logs_actividad (id_usuario, accion = 'aprobar_juego', detalles)
+    A19a. PostgreSQL → Games Service: Confirmación de log
+    A20a. Games Service → Redis: Invalidar caché de juegos (para refrescar listados)
+    A21a. Redis → Games Service: Confirmación de invalidación
+    A22a. Games Service → API Gateway: {message: "Juego aprobado y publicado"}
+
+Decisión: Rechazar
+    A16b. Games Service → PostgreSQL: UPDATE juegos SET estado = 'rechazado' WHERE id_juego = ?
+    A17b. PostgreSQL → Games Service: Confirmación de actualización
+    A18b. Games Service → PostgreSQL: INSERT INTO logs_actividad (id_usuario, accion = 'rechazar_juego', detalles)
+    A19b. PostgreSQL → Games Service: Confirmación de log
+    A20b. Games Service → Notification Service: Notificar al creador (sobre el rechazo y los motivos)
+    A21b. Notification Service → Games Service: Confirmación de envío
+    A22b. Games Service → API Gateway: {message: "Juego rechazado"}
+
+A23. API Gateway → Frontend: Reenviar respuesta
+A24. Frontend → Administrador: Mostrar mensaje de confirmación
+
+================================================================================
+MEDIDAS DE SEGURIDAD
+================================================================================
+
+1. Validación de tipo MIME del archivo.
+2. Escaneo de malware en los archivos subidos.
+3. Límite de tamaño de archivo (100MB - 500MB según tipo).
+4. Cuarentena de archivos sospechosos.
+5. Logs de todas las subidas y revisiones.
+6. Solo usuarios con rol Creador (Gold) pueden subir juegos.
+7. Proceso de revisión manual para evitar contenido inapropiado.

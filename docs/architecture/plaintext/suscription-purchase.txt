@@ -1,0 +1,103 @@
+================================================================================
+                    DIAGRAMA DE SECUENCIA - COMPRA DE SUSCRIPCIÓN
+                    EPIC THINGS PLATFORM v1.0
+================================================================================
+
+FLUJO PRINCIPAL - COMPRA DE SUSCRIPCIÓN EXITOSA
+--------------------------------------------------------------------------------
+
+1.  Usuario → Frontend: Selecciona plan de suscripción (Silver, Gold o Legend)
+2.  Frontend → Frontend: Verificar que el usuario esté autenticado
+    [No autenticado] → Redirigir a login
+3.  Frontend → API Gateway: POST /api/payment/create-checkout {plan_id, success_url, cancel_url}
+4.  API Gateway → Payment Service: Reenviar solicitud
+5.  Payment Service → Payment Service: Validar que el plan exista y esté activo
+6.  Payment Service → PostgreSQL: SELECT * FROM planes WHERE id_plan = ? AND activo = TRUE
+7.  PostgreSQL → Payment Service: Retorna datos del plan
+8.  Payment Service → Payment Service: Verificar si el usuario ya tiene suscripción activa
+9.  Payment Service → PostgreSQL: SELECT * FROM suscripciones WHERE id_usuario = ? AND estado = 'activa'
+10. PostgreSQL → Payment Service: Retorna suscripción activa (si existe)
+    [Ya tiene suscripción activa] → Error 400 "Ya tienes una suscripción activa"
+11. Payment Service → Payment Service: Crear sesión de checkout en Stripe
+12. Payment Service → Stripe API: POST /v1/checkout/sessions {price_id, success_url, cancel_url, customer_email}
+13. Stripe API → Payment Service: Retorna session_id y checkout_url
+14. Payment Service → PostgreSQL: INSERT INTO transacciones (id_usuario, monto, metodo_pago = 'stripe', estado = 'pendiente')
+15. PostgreSQL → Payment Service: Retorna id_transaccion
+16. Payment Service → Redis: Guardar relación session_id ↔ id_transaccion (TTL: 1 hora)
+17. Redis → Payment Service: Confirmación de almacenamiento
+18. Payment Service → API Gateway: {checkout_url, session_id}
+19. API Gateway → Frontend: Reenviar respuesta
+20. Frontend → Frontend: Redirigir al checkout de Stripe
+21. Frontend → Usuario: Mostrar página de pago de Stripe
+
+FLUJO - WEBHOOK DE STRIPE (PROCESAMIENTO DE PAGO)
+--------------------------------------------------------------------------------
+
+W1. Stripe API → API Gateway: Webhook POST /api/payment/webhook {event, session_id, ...}
+W2. API Gateway → Payment Service: Reenviar webhook
+W3. Payment Service → Payment Service: Verificar firma del webhook (validar que viene de Stripe)
+    [Firma inválida] → Error 401 Unauthorized
+W4. Payment Service → Redis: Obtener id_transaccion de session_id
+W5. Redis → Payment Service: Retorna id_transaccion
+
+Evento: checkout.session.completed
+    W6. Payment Service → PostgreSQL: UPDATE transacciones SET estado = 'completada', id_pago_externo = ? WHERE id_transaccion = ?
+    W7. PostgreSQL → Payment Service: Confirmación de actualización
+    W8. Payment Service → Payment Service: Obtener id_usuario de la transacción
+    W9. Payment Service → Payment Service: Calcular fecha_fin (fecha_inicio + periodo)
+    W10. Payment Service → PostgreSQL: INSERT INTO suscripciones (id_usuario, id_plan, id_transaccion, fecha_inicio, fecha_fin, estado = 'activa')
+    W11. PostgreSQL → Payment Service: Confirmación de creación de suscripción
+    W12. Payment Service → PostgreSQL: UPDATE transacciones SET id_suscripcion = ? WHERE id_transaccion = ?
+    W13. PostgreSQL → Payment Service: Confirmación de actualización
+    W14. Payment Service → Payment Service: Actualizar rol del usuario en usuarios_roles
+    W15. Payment Service → PostgreSQL: INSERT INTO usuarios_roles (id_usuario, id_rol correspondiente al plan)
+    W16. PostgreSQL → Payment Service: Confirmación de asignación de rol
+    W17. Payment Service → Redis: Eliminar la entrada session_id
+    W18. Redis → Payment Service: Confirmación de eliminación
+
+Evento: checkout.session.expired
+    W19. Payment Service → PostgreSQL: UPDATE transacciones SET estado = 'fallida' WHERE id_transaccion = ?
+    W20. PostgreSQL → Payment Service: Confirmación de actualización
+    W21. Payment Service → Redis: Eliminar la entrada session_id
+    W22. Redis → Payment Service: Confirmación de eliminación
+
+Evento: charge.refunded
+    W23. Payment Service → PostgreSQL: UPDATE transacciones SET estado = 'reembolsada' WHERE id_pago_externo = ?
+    W24. PostgreSQL → Payment Service: Confirmación de actualización
+    W25. Payment Service → PostgreSQL: UPDATE suscripciones SET estado = 'cancelada' WHERE id_suscripcion = ?
+    W26. PostgreSQL → Payment Service: Confirmación de actualización
+    W27. Payment Service → PostgreSQL: ELIMINAR usuario_rol correspondiente al plan
+    W28. PostgreSQL → Payment Service: Confirmación de eliminación
+
+W29. Payment Service → API Gateway: Confirmación de procesamiento
+W30. API Gateway → Stripe API: 200 OK
+
+FLUJO - CANCELACIÓN DE SUSCRIPCIÓN
+--------------------------------------------------------------------------------
+
+C1. Usuario → Frontend: Solicita cancelar suscripción
+C2. Frontend → API Gateway: POST /api/payment/cancel-subscription
+C3. API Gateway → Payment Service: Reenviar solicitud
+C4. Payment Service → PostgreSQL: SELECT * FROM suscripciones WHERE id_usuario = ? AND estado = 'activa'
+C5. PostgreSQL → Payment Service: Retorna suscripción activa
+    [No tiene suscripción activa] → Error 400 "No tienes suscripción activa"
+C6. Payment Service → Stripe API: POST /v1/subscriptions/{subscription_id}/cancel
+C7. Stripe API → Payment Service: Confirmación de cancelación
+C8. Payment Service → PostgreSQL: UPDATE suscripciones SET estado = 'cancelada' WHERE id_suscripcion = ?
+C9. PostgreSQL → Payment Service: Confirmación de actualización
+C10. Payment Service → PostgreSQL: ELIMINAR usuario_rol correspondiente al plan (usuario vuelve a Explorador)
+C11. PostgreSQL → Payment Service: Confirmación de eliminación
+C12. Payment Service → API Gateway: {message: "Suscripción cancelada"}
+C13. API Gateway → Frontend: Reenviar respuesta
+C14. Frontend → Usuario: Mostrar mensaje de confirmación
+
+================================================================================
+MEDIDAS DE SEGURIDAD
+================================================================================
+
+1. Webhooks firmados (verificación de origen).
+2. Idempotencia en procesamiento de webhooks.
+3. Datos de pago no almacenados localmente (Stripe maneja los datos sensibles).
+4. Tokens de sesión con expiración limitada.
+5. Logs de todas las transacciones para auditoría.
+6. Rollback automático en caso de error.

@@ -1,0 +1,220 @@
+@startuml
+' Título del diagrama
+title "Diagrama de Secuencia - Valoración de un Juego (Epic Things Platform)"
+
+' Definición de actores y objetos
+actor "Jugador" as player
+participant "Frontend\n(React)" as frontend
+participant "API Gateway" as gateway
+participant "Games Service" as games
+database "PostgreSQL" as db
+participant "Redis" as cache
+participant "Queue Service" as queue
+
+' ============================================
+' FLUJO PRINCIPAL - VALORACIÓN EXITOSA
+' ============================================
+
+player -> frontend: 1. Accede a página del juego
+activate frontend
+
+frontend -> gateway: 2. GET /api/games/{id_juego}
+activate gateway
+
+gateway -> games: 3. Reenviar solicitud a Games Service
+activate games
+
+games -> db: 4. SELECT * FROM juegos\nWHERE id_juego = ? AND estado = 'publicado'
+activate db
+
+db --> games: 5. Retorna datos del juego
+deactivate db
+
+games -> db: 6. SELECT * FROM valoraciones\nWHERE id_juego = ?\nORDER BY fecha_valoracion DESC LIMIT 20
+activate db
+
+db --> games: 7. Retorna últimas 20 valoraciones
+deactivate db
+
+games -> db: 8. SELECT AVG(puntuacion) as media,\nCOUNT(*) as total\nFROM valoraciones WHERE id_juego = ?
+activate db
+
+db --> games: 9. Retorna media y total de valoraciones
+deactivate db
+
+games --> gateway: 10. Retorna datos del juego,\nvaloraciones y estadísticas
+deactivate games
+
+gateway --> frontend: 11. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend --> player: 12. Mostrar página del juego\ncon información y valoraciones
+deactivate frontend
+
+' ============================================
+' FLUJO - JUGADOR ESCRIBE VALORACIÓN
+' ============================================
+
+player -> frontend: V1. Escribe comentario y selecciona puntuación (1-5)
+activate frontend
+
+frontend -> frontend: V2. Validar que el usuario esté autenticado
+alt No autenticado
+    frontend --> player: V2a. Redirigir a login\n"Más información después de iniciar sesión"
+    deactivate frontend
+    end
+
+frontend -> frontend: V3. Validar que la puntuación\nesté entre 1 y 5
+
+frontend -> gateway: V4. POST /api/games/{id_juego}/rate\n{puntuacion, comentario}
+activate gateway
+
+gateway -> games: V5. Reenviar solicitud a Games Service
+activate games
+
+games -> games: V6. Verificar que el usuario existe y está activo
+
+games -> db: V7. SELECT * FROM usuarios\nWHERE id_usuario = ? AND activo = TRUE
+activate db
+
+db --> games: V8. Retorna datos del usuario
+deactivate db
+
+games -> games: V9. Verificar si el juego existe y está publicado
+
+games -> db: V10. SELECT * FROM juegos\nWHERE id_juego = ? AND estado = 'publicado'
+activate db
+
+db --> games: V11. Retorna datos del juego
+deactivate db
+
+games -> db: V12. SELECT * FROM valoraciones\nWHERE id_usuario = ? AND id_juego = ?
+activate db
+
+db --> games: V13. Retorna valoración existente (si existe)
+deactivate db
+
+alt Ya ha valorado este juego
+    games -> db: V14a. UPDATE valoraciones\nSET puntuacion = ?, comentario = ?, fecha_valoracion = CURRENT_TIMESTAMP\nWHERE id_usuario = ? AND id_juego = ?
+    activate db
+    db --> games: V15a. Confirmación de actualización
+    deactivate db
+
+    games --> gateway: V16a. {message: "Valoración actualizada exitosamente"}
+
+else Nueva valoración
+    games -> db: V14b. INSERT INTO valoraciones\n(id_usuario, id_juego, puntuacion, comentario, fecha_valoracion)
+    activate db
+    db --> games: V15b. Confirmación de inserción
+    deactivate db
+
+    games --> gateway: V16b. {message: "Valoración agregada exitosamente"}
+end
+
+deactivate games
+
+gateway --> frontend: V17. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend -> frontend: V18. Actualizar la interfaz\n(mostrar nueva valoración y actualizar media)
+frontend -> frontend: V19. Refrescar estadísticas del juego
+
+frontend --> player: V20. Mostrar confirmación y nueva valoración
+deactivate frontend
+
+' ============================================
+' FLUJO ALTERNATIVO - VALORACIÓN CON ALERTAS DE SEGURIDAD
+' ============================================
+
+note right of games: Detección de comportamiento sospechoso
+
+games -> games: S1. Verificar patrones de spam:\n- Mismo comentario en múltiples juegos\n- Misma IP con múltiples valoraciones\n- Valoraciones extremas (todas 1 o todas 5)
+
+alt Comportamiento sospechoso detectado
+    games -> db: S2a. INSERT INTO logs_actividad\n(id_usuario, accion = 'spam_detectado', detalles)
+    activate db
+    db --> games: S3a. Confirmación de log
+    deactivate db
+
+    games -> queue: S4a. Enviar alerta a moderadores
+    activate queue
+    queue --> games: S5a. Confirmación de encolado
+    deactivate queue
+
+    games -> games: S6a. Marcar valoración como 'revisar'
+    alt Valoración automáticamente oculta
+        games --> gateway: S7a. {message: "Valoración enviada para revisión"}
+    else Valoración aprobada automáticamente
+        games --> gateway: S7b. {message: "Valoración agregada exitosamente"}
+    end
+
+else Comportamiento normal
+    games --> gateway: S2b. {message: "Valoración agregada exitosamente"}
+end
+
+' ============================================
+' FLUJO - REPORTAR VALORACIÓN INAPROPIADA
+' ============================================
+
+player -> frontend: R1. Clic en "Reportar" en una valoración
+activate frontend
+
+frontend -> frontend: R2. Verificar autenticación
+
+frontend -> gateway: R3. POST /api/games/{id_juego}/reports\n{valoracion_id, motivo, descripcion}
+activate gateway
+
+gateway -> games: R4. Reenviar solicitud a Games Service
+activate games
+
+games -> db: R5. SELECT * FROM valoraciones\nWHERE id_valoracion = ?
+activate db
+
+db --> games: R6. Retorna valoración reportada
+deactivate db
+
+games -> games: R7. Verificar que el usuario no se esté reportando a sí mismo
+
+games -> db: R8. INSERT INTO reportes\n(id_usuario_reportante, id_juego_reportado, tipo = 'comentario', motivo, descripcion, estado = 'pendiente')
+activate db
+
+db --> games: R9. Confirmación de reporte
+deactivate db
+
+games -> db: R10. INSERT INTO logs_actividad\n(id_usuario, accion = 'reportar_comentario', detalles)
+activate db
+
+db --> games: R11. Confirmación de log
+deactivate db
+
+games -> queue: R12. Enviar notificación a moderadores
+activate queue
+
+queue --> games: R13. Confirmación de encolado
+deactivate queue
+
+games --> gateway: R14. {message: "Reporte enviado exitosamente"}
+deactivate games
+
+gateway --> frontend: R15. Reenviar respuesta al frontend
+deactivate gateway
+
+frontend --> player: R16. Mostrar mensaje de confirmación
+deactivate frontend
+
+' ============================================
+' ANOTACIONES DE SEGURIDAD
+' ============================================
+
+note right of games
+  **Medidas de seguridad implementadas:**
+  1. Solo usuarios autenticados pueden valorar.
+  2. Un usuario solo puede valorar un juego una vez.
+  3. Detección de spam y comportamiento sospechoso.
+  4. Moderación de valoraciones reportadas.
+  5. Logs de todas las valoraciones y reportes.
+  6. No se permite puntuar juegos del mismo creador.
+  7. Sistema de verificación de integridad (evitar bots).
+end note
+
+@enduml
